@@ -1,0 +1,8 @@
+pre-release-replacements = [
+  { 
+    file = "CHANGELOG.md",
+    search = "## \\[unreleased\\]",
+    replace = "## [{{version}}] - {{date}}",
+    exactly = 1
+  }
+]

@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+  />
+  <title>Claw Guandan</title>
+  <link rel="icon" type="image/png" href="/images/clawguandan.png" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <h1 class="brand-title">
+        <img src="/images/clawguandan.png" alt="Claw Guandan logo" class="brand-logo" />
+        <span data-i18n="appTitle">Claw Guandan</span>
+      </h1>
+      <div class="topbar-right">
+        <span class="lang-switch" role="group" aria-label="Language">
+          <button type="button" class="lang-btn" data-lang="zh-CN" title="简体中文">中</button>
+          <button type="button" class="lang-btn" data-lang="en" title="English">En</button>
+        </span>
+      </div>
+    </header>
+
+    <div id="errorBox" class="error hidden"></div>
+    <div id="actionToast" class="action-toast hidden" role="status" aria-live="polite"></div>
+
+    <section id="lobbyView" class="scene scene-lobby">
+      <section class="panel">
+        <div class="panel-head">
+          <h2 data-i18n="tables">Tables</h2>
+          <button id="refreshTablesBtn" type="button" class="refresh-btn" data-i18n="refreshTables">Manual refresh</button>
+        </div>
+        <div id="tablesList" class="lobby-tables"></div>
+        <div id="tablesEmptyHint" class="tables-empty-hint muted hidden" data-i18n="noTables">No tables</div>
+      </section>
+    </section>
+
+    <div id="playerNameModal" class="modal-backdrop hidden" aria-hidden="true">
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="playerNameModalTitle">
+        <h3 id="playerNameModalTitle" data-i18n="playerNameDialogTitle">Enter player name</h3>
+        <p class="muted" data-i18n="playerNameDialogHint">Enter a name before joining a table.</p>
+        <input id="playerNameModalInput" type="text" maxlength="24" placeholder="playerName" data-i18n="phPlayerName" data-i18n-placeholder="true" />
+        <div class="modal-actions">
+          <button id="playerNameCancelBtn" type="button" data-i18n="cancel">Cancel</button>
+          <button id="playerNameConfirmBtn" type="button" class="accent-btn" data-i18n="confirm">Confirm</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="createTableModal" class="modal-backdrop hidden" aria-hidden="true">
+      <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="createTableModalTitle">
+        <h3 id="createTableModalTitle" data-i18n="createTableDialogTitle">Create new table</h3>
+        <p class="muted" data-i18n="createTableDialogHint">Name is optional. Leave blank to use tableId.</p>
+        <input id="createTableModalInput" type="text" maxlength="48" placeholder="Table name (optional)" data-i18n="phTableNameOptional" data-i18n-placeholder="true" />
+        <div class="modal-actions">
+          <button id="createTableCancelBtn" type="button" data-i18n="cancel">Cancel</button>
+          <button id="createTableConfirmBtn" type="button" class="accent-btn" data-i18n="confirm">Confirm</button>
+        </div>
+      </section>
+    </div>
+
+    <section id="tableView" class="scene scene-table hidden">
+      <section id="portraitSeatOverview" class="panel portrait-seat-overview hidden">
+        <div id="portraitSeatGrid" class="portrait-seat-grid"></div>
+      </section>
+      <section id="tableStage" class="table-stage">
+        <div class="table-surface">
+          <div id="seatGrid" class="table-seats"></div>
+          <div id="trickBySeat" class="trick-layer"></div>
+          <div id="tableNarration" class="table-narration hidden" aria-live="polite"></div>
+          <div id="readyCta" class="ready-cta hidden">
+            <button id="readyBtn" type="button" class="ready-main-btn" data-i18n="ready">Ready</button>
+          </div>
+        </div>
+        <section id="trickFeedWrap" class="panel trick-feed-wrap hidden">
+          <h3 data-i18n="trickFeedTitle">Current trick</h3>
+          <div id="trickFeed" class="trick-feed"></div>
+        </section>
+      </section>
+
+      <section class="panel action-dock">
+        <div class="action-row action-row-main">
+          <button id="playBtn" type="button" class="accent-btn action-main-btn" data-i18n="playSelectedCards">Play selected cards</button>
+          <button id="passBtn" type="button" class="action-main-btn" data-i18n="pass">Pass</button>
+        </div>
+        <div id="readyFlowRow" class="action-row action-row-main ready-flow-row hidden">
+          <button id="readyFlowBtn" type="button" class="accent-btn action-main-btn" data-i18n="ready">Ready</button>
+        </div>
+        <div id="tributeRow" class="tribute-row hidden">
+          <div class="action-row action-row-main">
+            <button id="tributeBtn" type="button" class="action-main-btn" data-i18n="submitTribute">Tribute</button>
+          </div>
+        </div>
+        <div id="returnRow" class="tribute-row hidden">
+          <div class="action-row action-row-main">
+            <button id="returnCardBtn" type="button" class="action-main-btn" data-i18n="submitReturnCard">Submit return card</button>
+          </div>
+        </div>
+        <div class="private-hand-area">
+          <div class="hand-area-title" data-i18n="privateHandHint">Hand area</div>
+          <div id="privateHand" class="cards cards-lg cards-by-rank"></div>
+        </div>
+      </section>
+
+      <details class="panel debug-panel">
+        <summary data-i18n="debugInfo">Detailed state (debug)</summary>
+        <div id="connectionState" class="pill debug-conn" data-i18n="connIdle">Idle</div>
+        <div id="tableMeta" class="muted" data-i18n="noTableSelected">No table selected</div>
+        <div id="tableTurnInfo" class="turn-info"></div>
+        <div id="tableLegalActions" class="legal-actions"></div>
+        <div id="promptInfo" class="prompt"></div>
+        <div id="topPlay" class="top-play"></div>
+        <h3 data-i18n="tableHistory">Table history</h3>
+        <div id="history" class="history"></div>
+        <div id="sessionInfo" class="mono muted"></div>
+        <div id="expectInfo" class="mono muted"></div>
+      </details>
+    </section>
+  </main>
+  <script src="/i18n.js" defer></script>
+  <script src="/app.js" defer></script>
+</body>
+</html>
