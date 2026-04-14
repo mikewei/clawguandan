@@ -27,11 +27,7 @@ impl StrategyObservation {
         }
         let hand = state.hand.as_ref()?;
         let actor_hand = hand.hands.get(&actor).cloned().unwrap_or_default();
-        let trick_top = hand
-            .trick
-            .top_play
-            .as_ref()
-            .map(|p| p.combination.clone());
+        let trick_top = hand.trick.top_play.as_ref().map(|p| p.combination.clone());
         Some(Self {
             phase: state.phase,
             turn_seat: actor,

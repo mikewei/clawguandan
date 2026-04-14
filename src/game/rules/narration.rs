@@ -32,7 +32,12 @@ pub fn format_rank_announce(player_name: &str, rank: usize) -> String {
     )
 }
 
-pub fn format_tribute_action(player_name: &str, card: &str, target_name: &str, is_return: bool) -> String {
+pub fn format_tribute_action(
+    player_name: &str,
+    card: &str,
+    target_name: &str,
+    is_return: bool,
+) -> String {
     if is_return {
         bilingual(
             format!(

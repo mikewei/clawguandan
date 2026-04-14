@@ -36,7 +36,10 @@ impl From<std::io::Error> for CliRunError {
 }
 
 /// Run `clawguandan` (or another binary) with the given args; on non-zero status, return [`CliRunError`].
-pub fn run_cli_command(bin: &Path, args: &[impl AsRef<std::ffi::OsStr>]) -> Result<Output, CliRunError> {
+pub fn run_cli_command(
+    bin: &Path,
+    args: &[impl AsRef<std::ffi::OsStr>],
+) -> Result<Output, CliRunError> {
     let out = Command::new(bin).args(args).output()?;
     if !out.status.success() {
         return Err(CliRunError::NonZeroStatus {
@@ -48,11 +51,14 @@ pub fn run_cli_command(bin: &Path, args: &[impl AsRef<std::ffi::OsStr>]) -> Resu
 }
 
 /// `clawguandan table create` argv (omit binary name; pass as `run_cli_command(bin, &args)`).
-pub fn cli_argv_table_create(name: Option<&str>) -> Vec<String> {
+pub fn cli_argv_table_create(name: Option<&str>, rank: Option<&str>) -> Vec<String> {
     let mut v = vec!["table".into(), "create".into()];
     if let Some(n) = name {
-        v.push("--name".into());
         v.push(n.to_string());
+    }
+    if let Some(r) = rank {
+        v.push("--rank".into());
+        v.push(r.to_string());
     }
     v
 }
@@ -112,7 +118,12 @@ pub fn cli_argv_play_pass(table_id: &str, player_id: &str, seq: u64) -> Vec<Stri
 }
 
 /// `clawguandan play playcards ...` — `cards` is comma-separated symbols (see CLI).
-pub fn cli_argv_play_playcards(table_id: &str, player_id: &str, seq: u64, cards_csv: &str) -> Vec<String> {
+pub fn cli_argv_play_playcards(
+    table_id: &str,
+    player_id: &str,
+    seq: u64,
+    cards_csv: &str,
+) -> Vec<String> {
     vec![
         "play".into(),
         "playcards".into(),
@@ -192,7 +203,12 @@ pub fn cli_argv_table_nextstate_observer(table_id: &str, timeout_ms: u64) -> Vec
 
 /// `clawguandan table snapshot -t ...` with optional `-p`
 pub fn cli_argv_table_snapshot(table_id: &str, player_id: Option<&str>) -> Vec<String> {
-    let mut v = vec!["table".into(), "snapshot".into(), "-t".into(), table_id.to_string()];
+    let mut v = vec![
+        "table".into(),
+        "snapshot".into(),
+        "-t".into(),
+        table_id.to_string(),
+    ];
     if let Some(pid) = player_id {
         v.push("-p".into());
         v.push(pid.to_string());
@@ -216,7 +232,12 @@ pub fn cli_argv_play_tribute(table_id: &str, player_id: &str, seq: u64, card: &s
 }
 
 /// `clawguandan play returncard ...`
-pub fn cli_argv_play_returncard(table_id: &str, player_id: &str, seq: u64, card: &str) -> Vec<String> {
+pub fn cli_argv_play_returncard(
+    table_id: &str,
+    player_id: &str,
+    seq: u64,
+    card: &str,
+) -> Vec<String> {
     vec![
         "play".into(),
         "returncard".into(),

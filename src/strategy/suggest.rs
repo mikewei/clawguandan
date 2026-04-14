@@ -3,7 +3,7 @@
 use std::cmp::Ordering;
 
 use crate::domain::Seat;
-use crate::game::card::{is_wild, level_order_value, parse_card_symbol, RuleContext};
+use crate::game::card::{RuleContext, is_wild, level_order_value, parse_card_symbol};
 use crate::game::engine::PlayerAction;
 use crate::game::rules::combination_parser::{CombinationClass, CombinationParser};
 use crate::game::types::{GamePhase, TableGameState};
@@ -19,10 +19,7 @@ pub fn suggest_next_action(state: &TableGameState, actor: Seat) -> Result<Player
         return Err("no legal actions".into());
     }
 
-    let hand = state
-        .hand
-        .as_ref()
-        .ok_or_else(|| "no hand".to_string())?;
+    let hand = state.hand.as_ref().ok_or_else(|| "no hand".to_string())?;
     let ctx = RuleContext {
         hand_level: hand.hand_level,
     };
@@ -96,7 +93,11 @@ fn pick_playing(legal: &[PlayerAction], ctx: RuleContext) -> Result<PlayerAction
 }
 
 /// Prefer `a` over `b` if Ordering::Less.
-fn playing_cmp(a: &PlayerAction, b: Option<&PlayerAction>, ctx: RuleContext) -> Result<Ordering, String> {
+fn playing_cmp(
+    a: &PlayerAction,
+    b: Option<&PlayerAction>,
+    ctx: RuleContext,
+) -> Result<Ordering, String> {
     let Some(b) = b else {
         return Ok(Ordering::Less);
     };
@@ -151,7 +152,11 @@ mod tests {
         }
     }
 
-    fn mk_playing_state(actor: Seat, actor_hand: Vec<&str>, top_cards: Option<(Seat, Vec<&str>)>) -> TableGameState {
+    fn mk_playing_state(
+        actor: Seat,
+        actor_hand: Vec<&str>,
+        top_cards: Option<(Seat, Vec<&str>)>,
+    ) -> TableGameState {
         let mut s = TableGameState::new("t_suggest".into());
         s.phase = GamePhase::Playing;
         s.turn_seat = actor;
@@ -267,11 +272,7 @@ mod tests {
 
     #[test]
     fn suggest_returns_pass_when_no_play_can_beat_top() {
-        let state = mk_playing_state(
-            Seat::E,
-            vec!["♠3"],
-            Some((Seat::N, vec!["♠A"])),
-        );
+        let state = mk_playing_state(Seat::E, vec!["♠3"], Some((Seat::N, vec!["♠A"])));
         let picked = suggest_next_action(&state, Seat::E).unwrap();
         assert_eq!(picked, PlayerAction::Pass);
     }
@@ -281,11 +282,7 @@ mod tests {
         // Hand level 2, so all "2" cards are wildcards.
         // Both plays can beat top single "♠6", and both are non-bomb singles.
         // Expect non-wild "♠7" to be preferred over wild "♠2".
-        let state = mk_playing_state(
-            Seat::E,
-            vec!["♠2", "♠7"],
-            Some((Seat::N, vec!["♠6"])),
-        );
+        let state = mk_playing_state(Seat::E, vec!["♠2", "♠7"], Some((Seat::N, vec!["♠6"])));
         let picked = suggest_next_action(&state, Seat::E).unwrap();
         assert_eq!(
             picked,

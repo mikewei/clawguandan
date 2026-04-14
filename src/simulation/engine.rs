@@ -62,9 +62,7 @@ pub fn run_match_engine(
 
         loop {
             if plies >= max_plies {
-                return Err(EngineSimError::Engine(
-                    "max_plies exceeded".to_string(),
-                ));
+                return Err(EngineSimError::Engine("max_plies exceeded".to_string()));
             }
             if state.phase == GamePhase::Scoring {
                 hands_played += 1;
@@ -81,9 +79,7 @@ pub fn run_match_engine(
             }
 
             let Some(actor) = current_actor_seat(state) else {
-                return Err(EngineSimError::Engine(
-                    "no current actor for phase".into(),
-                ));
+                return Err(EngineSimError::Engine("no current actor for phase".into()));
             };
             let action = suggest_next_action(state, actor).map_err(EngineSimError::Movegen)?;
 

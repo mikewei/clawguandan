@@ -1,7 +1,7 @@
 use axum::{
+    Json,
     http::StatusCode,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::Serialize;
 
@@ -53,12 +53,7 @@ impl IntoResponse for AppError {
                 message,
                 code,
                 current_seq,
-            } => (
-                StatusCode::CONFLICT,
-                *code,
-                message.clone(),
-                *current_seq,
-            ),
+            } => (StatusCode::CONFLICT, *code, message.clone(), *current_seq),
             AppError::Unprocessable {
                 message,
                 code,

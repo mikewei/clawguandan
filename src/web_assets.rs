@@ -45,7 +45,8 @@ pub async fn serve_embedded(uri: Uri) -> Response {
     let content_type = content_type_for_path(&path);
     resp.headers_mut().insert(
         header::CONTENT_TYPE,
-        HeaderValue::from_str(content_type).unwrap_or(HeaderValue::from_static("application/octet-stream")),
+        HeaderValue::from_str(content_type)
+            .unwrap_or(HeaderValue::from_static("application/octet-stream")),
     );
     resp
 }

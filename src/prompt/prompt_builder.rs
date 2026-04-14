@@ -63,4 +63,3 @@ mod tests {
         assert_eq!(p, "Game in progress. Waiting for next transition.");
     }
 }
-

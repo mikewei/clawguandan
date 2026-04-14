@@ -1,5 +1,6 @@
 use crate::domain::{Phase, PlayerType, PrivateView, TableState, TableStatus};
 use crate::error::AppError;
+use crate::game::rules::scoring::Level;
 use crate::game::types::GamePhase;
 use crate::store::{SeatOrAuto, TableStore};
 use crate::strategy::{current_actor_seat, suggest_next_action};
@@ -23,22 +24,22 @@ pub fn router(state: AppState) -> Router {
         .route("/api/v1/tables", get(list_tables).post(create_table))
         .route("/api/v1/tables/:table_id/join", post(join_table))
         .route("/api/v1/tables/:table_id/ready", post(ready))
-        .route("/api/v1/tables/:table_id/actions/tribute", post(action_tribute))
-        .route("/api/v1/tables/:table_id/actions/return_card", post(action_return_card))
+        .route(
+            "/api/v1/tables/:table_id/actions/tribute",
+            post(action_tribute),
+        )
+        .route(
+            "/api/v1/tables/:table_id/actions/return_card",
+            post(action_return_card),
+        )
         .route("/api/v1/tables/:table_id/actions/play", post(action_play))
         .route("/api/v1/tables/:table_id/actions/pass", post(action_pass))
         .route(
             "/api/v1/tables/:table_id/nextstate",
             get(nextstate).post(nextstate_post),
         )
-        .route(
-            "/api/v1/tables/:table_id/snapshot",
-            get(snapshot),
-        )
-        .route(
-            "/api/v1/tables/:table_id/suggest",
-            get(suggest),
-        )
+        .route("/api/v1/tables/:table_id/snapshot", get(snapshot))
+        .route("/api/v1/tables/:table_id/suggest", get(suggest))
         .fallback(get(crate::web_assets::serve_embedded))
         .with_state(state)
 }
@@ -56,6 +57,8 @@ async fn ping() -> Json<serde_json::Value> {
 pub struct CreateTableBody {
     #[serde(default)]
     pub name: Option<String>,
+    #[serde(default)]
+    pub rank: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -70,12 +73,37 @@ async fn create_table(
     State(state): State<AppState>,
     Json(body): Json<CreateTableBody>,
 ) -> Result<Json<CreateTableResponse>, AppError> {
-    let t = state.store.create_table(body.name).await;
+    let start_level = parse_create_rank(body.rank.as_deref())?;
+    let t = state.store.create_table(body.name, start_level).await;
     Ok(Json(CreateTableResponse {
         table_id: t.table_id.clone(),
         seq: t.seq,
         status: t.status.clone(),
     }))
+}
+
+fn parse_create_rank(rank: Option<&str>) -> Result<Level, AppError> {
+    let Some(rank) = rank else {
+        return Ok(Level::Two);
+    };
+    match rank.trim().to_ascii_uppercase().as_str() {
+        "2" => Ok(Level::Two),
+        "3" => Ok(Level::Three),
+        "4" => Ok(Level::Four),
+        "5" => Ok(Level::Five),
+        "6" => Ok(Level::Six),
+        "7" => Ok(Level::Seven),
+        "8" => Ok(Level::Eight),
+        "9" => Ok(Level::Nine),
+        "10" => Ok(Level::Ten),
+        "J" => Ok(Level::J),
+        "Q" => Ok(Level::Q),
+        "K" => Ok(Level::K),
+        "A" => Ok(Level::A),
+        _ => Err(AppError::BadRequest(
+            "invalid rank; allowed values: 2-10, J, Q, K, A".into(),
+        )),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -327,10 +355,7 @@ async fn suggest(
     let snap = state.store.get_snapshot(&table_id).await?;
     if q.seq != snap.seq {
         return Err(AppError::Conflict {
-            message: format!(
-                "stale seq: expected {}, got {}",
-                snap.seq, q.seq
-            ),
+            message: format!("stale seq: expected {}, got {}", snap.seq, q.seq),
             code: "STALE_SEQ",
             current_seq: Some(snap.seq),
         });
@@ -342,22 +367,18 @@ async fn suggest(
             current_seq: Some(snap.seq),
         });
     }
-    let game = snap
-        .game
-        .as_ref()
-        .ok_or_else(|| AppError::Conflict {
-            message: "game state not initialized".into(),
-            code: "INVALID_TABLE_STATUS",
-            current_seq: Some(snap.seq),
-        })?;
+    let game = snap.game.as_ref().ok_or_else(|| AppError::Conflict {
+        message: "game state not initialized".into(),
+        code: "INVALID_TABLE_STATUS",
+        current_seq: Some(snap.seq),
+    })?;
     if matches!(game.phase, GamePhase::Scoring) {
         return Err(AppError::BadRequest(
             "hand finished (scoring); wait for next hand to start".into(),
         ));
     }
-    let actor = current_actor_seat(game).ok_or_else(|| {
-        AppError::BadRequest("no actor for current phase".into())
-    })?;
+    let actor = current_actor_seat(game)
+        .ok_or_else(|| AppError::BadRequest("no actor for current phase".into()))?;
     let expected_pid = snap
         .player_id_for_seat(actor)
         .ok_or_else(|| AppError::BadRequest("missing player_id for actor seat".into()))?;
@@ -436,9 +457,8 @@ async fn nextstate_inner(
             *res.status_mut() = StatusCode::NO_CONTENT;
             res.headers_mut().insert(
                 HeaderName::from_static("x-table-seq"),
-                HeaderValue::from_str(&snap.seq.to_string()).map_err(|_| {
-                    AppError::BadRequest("invalid X-Table-Seq header value".into())
-                })?,
+                HeaderValue::from_str(&snap.seq.to_string())
+                    .map_err(|_| AppError::BadRequest("invalid X-Table-Seq header value".into()))?,
             );
             res.headers_mut().insert(
                 HeaderName::from_static("x-table-lag"),
@@ -486,7 +506,9 @@ async fn snapshot(
     }
 
     let table_state = snap.to_table_state();
-    let private = q.player_id.and_then(|pid| snap.private_view_for_player(&pid));
+    let private = q
+        .player_id
+        .and_then(|pid| snap.private_view_for_player(&pid));
 
     Ok(Json(SnapshotResponse {
         state: table_state,
@@ -496,7 +518,5 @@ async fn snapshot(
 
 /// Test helper: router with injected store.
 pub fn app_with_store(store: TableStore) -> Router {
-    router(AppState {
-        store,
-    })
+    router(AppState { store })
 }

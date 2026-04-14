@@ -1,8 +1,12 @@
 use std::collections::HashSet;
 
-use crate::game::card::{is_wild, natural_rank_value, parse_card_symbol, to_card_symbol, Card, Rank, RuleContext, Suit};
+use crate::game::card::{
+    Card, Rank, RuleContext, Suit, is_wild, natural_rank_value, parse_card_symbol, to_card_symbol,
+};
 use crate::game::rules::beat_comparator::BeatComparator;
-use crate::game::rules::combination_parser::{BombKind, Combination, CombinationClass, CombinationKind, CombinationParser, OrdinaryKind};
+use crate::game::rules::combination_parser::{
+    BombKind, Combination, CombinationClass, CombinationKind, CombinationParser, OrdinaryKind,
+};
 
 pub struct WildTargetInfer;
 
@@ -66,7 +70,9 @@ fn search_best(
                 Ok(c) => c,
                 Err(_) => return,
             };
-            if let Some(t) = top && !BeatComparator::can_beat(t, &combo) {
+            if let Some(t) = top
+                && !BeatComparator::can_beat(t, &combo)
+            {
                 return;
             }
             let key = strength_key(&combo, cur);
@@ -125,10 +131,14 @@ fn adjacent_ranks(rank: Rank) -> Vec<Rank> {
         return vec![];
     };
     let mut out = Vec::new();
-    if v > 2 && let Some(r) = rank_from_natural(v - 1) {
+    if v > 2
+        && let Some(r) = rank_from_natural(v - 1)
+    {
         out.push(r);
     }
-    if v < 14 && let Some(r) = rank_from_natural(v + 1) {
+    if v < 14
+        && let Some(r) = rank_from_natural(v + 1)
+    {
         out.push(r);
     }
     // Keep A-low adjacency for sequence-family heuristics.
@@ -239,7 +249,9 @@ mod tests {
             hand_level: HandLevel::Two,
         };
         let cards = vec!["♥2".into(), "♠A".into(), "♥A".into(), "♦A".into()];
-        let inferred = WildTargetInfer::infer_best(&cards, ctx, None).unwrap().unwrap();
+        let inferred = WildTargetInfer::infer_best(&cards, ctx, None)
+            .unwrap()
+            .unwrap();
         let combo = CombinationParser::parse(&cards, Some(&inferred), ctx).unwrap();
         assert!(matches!(combo.kind, CombinationKind::Bomb(_)));
     }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::game::card::{level_order_value, natural_rank_value, Card, Rank, RuleContext, Suit};
+use crate::game::card::{Card, Rank, RuleContext, Suit, level_order_value, natural_rank_value};
 use crate::game::rules::wildcard_resolver::WildcardResolver;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,9 +22,9 @@ pub enum OrdinaryKind {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BombKind {
-    SameRank { n: u8 },      // 4..=10
-    StraightFlush,          // 5
-    FourJoker,              // 4
+    SameRank { n: u8 }, // 4..=10
+    StraightFlush,      // 5
+    FourJoker,          // 4
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -172,7 +172,13 @@ impl CombinationParser {
                     Ok(Combination {
                         kind: CombinationKind::Ordinary(OrdinaryKind::FullHouse),
                         cards_len: 5,
-                        primary: level_order_value(Card { suit: Suit::Spades, rank: triple_rank }, ctx),
+                        primary: level_order_value(
+                            Card {
+                                suit: Suit::Spades,
+                                rank: triple_rank,
+                            },
+                            ctx,
+                        ),
                         bomb_tier: 0,
                     })
                 } else {
@@ -447,12 +453,7 @@ mod tests {
         let ctx = RuleContext {
             hand_level: HandLevel::Ten,
         };
-        let c = CombinationParser::parse(
-            &["♠7".into(), "♥7".into()],
-            None,
-            ctx,
-        )
-        .unwrap();
+        let c = CombinationParser::parse(&["♠7".into(), "♥7".into()], None, ctx).unwrap();
         assert_eq!(c.kind, CombinationKind::Ordinary(OrdinaryKind::Pair));
     }
 
@@ -461,12 +462,8 @@ mod tests {
         let ctx = RuleContext {
             hand_level: HandLevel::Ten,
         };
-        let c = CombinationParser::parse(
-            &["♠Q".into(), "♥Q".into(), "♦Q".into()],
-            None,
-            ctx,
-        )
-        .unwrap();
+        let c =
+            CombinationParser::parse(&["♠Q".into(), "♥Q".into(), "♦Q".into()], None, ctx).unwrap();
         assert_eq!(c.kind, CombinationKind::Ordinary(OrdinaryKind::Triple));
     }
 
@@ -501,10 +498,7 @@ mod tests {
             ctx,
         )
         .unwrap();
-        assert_eq!(
-            c.kind,
-            CombinationKind::Bomb(BombKind::SameRank { n: 4 })
-        );
+        assert_eq!(c.kind, CombinationKind::Bomb(BombKind::SameRank { n: 4 }));
         assert_eq!(c.bomb_tier, 1);
     }
 
@@ -517,4 +511,3 @@ mod tests {
         assert_eq!(c.kind, CombinationKind::Ordinary(OrdinaryKind::Single));
     }
 }
-

@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
-use reqwest::blocking::Client;
 use reqwest::StatusCode;
+use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashSet;
@@ -16,7 +16,7 @@ use std::time::Duration;
 use url::Url;
 
 use clawguandan::domain::{
-    apply_transition_delta_to_table_state, NextStateBody, PrivateView, TableState,
+    NextStateBody, PrivateView, TableState, apply_transition_delta_to_table_state,
 };
 use clawguandan::game::engine::PlayerAction;
 use clawguandan::simulation::run_cli_command;
@@ -115,7 +115,9 @@ fn session_json_path(session_key: &str) -> PathBuf {
 
 /// Write `session.json` via temp file + rename (best-effort atomic replace).
 fn write_session_state_atomic(path: &Path, json: &str) -> Result<(), String> {
-    let dir = path.parent().ok_or_else(|| "session path has no parent".to_string())?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| "session path has no parent".to_string())?;
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let fname = path
         .file_name()
@@ -247,10 +249,7 @@ fn observer_session_json_path(base: &str, table_id: &str) -> Result<PathBuf, Str
     Ok(session_json_path(&seq_key(&sid, table_id, "observer")))
 }
 
-fn read_observer_session(
-    base: &str,
-    table_id: &str,
-) -> Result<Option<PlayerSession>, String> {
+fn read_observer_session(base: &str, table_id: &str) -> Result<Option<PlayerSession>, String> {
     let path = observer_session_json_path(base, table_id)?;
     if path.exists() {
         let raw = fs::read_to_string(&path).map_err(|e| e.to_string())?;
@@ -347,7 +346,11 @@ fn normalize_base(url: &str) -> String {
 }
 
 #[derive(Parser)]
-#[command(name = "clawguandan", version, about = "Guan Dan — Server + API client")]
+#[command(
+    name = "clawguandan",
+    version,
+    about = "Guan Dan — Server + API client"
+)]
 pub(crate) struct Cli {
     #[command(subcommand)]
     pub(crate) command: Top,
@@ -421,9 +424,7 @@ pub(crate) enum ServerCmd {
         no_auto_use: bool,
     },
     /// Set active server URL
-    Use {
-        host_or_port: String,
-    },
+    Use { host_or_port: String },
     /// Probe configured server and print config summary
     Status,
 }
@@ -439,6 +440,9 @@ pub(crate) enum TableCmd {
     /// Create a table (name is optional metadata for humans)
     Create {
         name: Option<String>,
+        /// Starting rank/level (2-10, J, Q, K, A). Default: 2.
+        #[arg(long)]
+        rank: Option<String>,
     },
     /// Join a table
     Join {
@@ -588,7 +592,7 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
         }
         Top::Table { cmd } => match cmd {
             TableCmd::List { detail } => table_list(detail),
-            TableCmd::Create { name } => table_create(name),
+            TableCmd::Create { name, rank } => table_create(name, rank),
             TableCmd::Join {
                 table_id,
                 name,
@@ -642,7 +646,13 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 player_id,
                 seq,
                 card,
-            } => play_action(table_id, player_id, seq, "return_card", json!({ "card": card })),
+            } => play_action(
+                table_id,
+                player_id,
+                seq,
+                "return_card",
+                json!({ "card": card }),
+            ),
             PlayCmd::Playcards {
                 table_id,
                 player_id,
@@ -686,11 +696,9 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
 }
 
 pub fn resolve_port(port_opt: Option<u16>) -> Result<u16, String> {
-    let port = port_opt.or_else(|| {
-        std::env::var("PORT")
-            .ok()
-            .and_then(|s| s.parse().ok())
-    }).unwrap_or(22222);
+    let port = port_opt
+        .or_else(|| std::env::var("PORT").ok().and_then(|s| s.parse().ok()))
+        .unwrap_or(22222);
     Ok(port)
 }
 
@@ -738,14 +746,7 @@ pub async fn server_start(auto_use: bool) -> Result<(), String> {
 
     // Self-spawn: run the same binary with `server serve`.
     let child = Command::new(&server_bin)
-        .args([
-            "server",
-            "serve",
-            "--port",
-            "22222",
-            "--ip",
-            "0.0.0.0",
-        ])
+        .args(["server", "serve", "--port", "22222", "--ip", "0.0.0.0"])
         .env("PORT", "22222")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -865,7 +866,9 @@ pub async fn server_restart(auto_use: bool) -> Result<(), String> {
         if !restart_may_ignore_failed_stop() {
             return Err(e);
         }
-        println!("note: stop failed but {LOCAL_SERVER_PROBE_ADDR} is unreachable; continuing restart ({e})");
+        println!(
+            "note: stop failed but {LOCAL_SERVER_PROBE_ADDR} is unreachable; continuing restart ({e})"
+        );
     }
     server_start(auto_use).await
 }
@@ -915,22 +918,22 @@ fn table_list(detail: bool) -> Result<(), String> {
     if detail {
         u.query_pairs_mut().append_pair("detail", "true");
     }
-    let r = client
-        .get(u.as_str())
-        .send()
-        .map_err(|e| e.to_string())?;
+    let r = client.get(u.as_str()).send().map_err(|e| e.to_string())?;
     if !r.status().is_success() {
         return Err(format!("list failed: {}", r.status()));
     }
     let v: serde_json::Value = r.json().map_err(|e| e.to_string())?;
-    println!("{}", serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
+    );
     Ok(())
 }
 
-fn table_create(name: Option<String>) -> Result<(), String> {
+fn table_create(name: Option<String>, rank: Option<String>) -> Result<(), String> {
     let base = load_active_server_base()?;
     let client = http_client()?;
-    let body = json!({ "name": name });
+    let body = json!({ "name": name, "rank": rank });
     let r = client
         .post(format!("{}/api/v1/tables", base))
         .json(&body)
@@ -940,7 +943,10 @@ fn table_create(name: Option<String>) -> Result<(), String> {
         return Err(format!("create failed: {}", r.status()));
     }
     let v: serde_json::Value = r.json().map_err(|e| e.to_string())?;
-    println!("{}", serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
+    );
     Ok(())
 }
 
@@ -970,10 +976,15 @@ fn table_snapshot(table_id: String, player_id: Option<String>) -> Result<(), Str
     let status = r.status();
     if !status.is_success() {
         let v: serde_json::Value = r.json().unwrap_or(json!({}));
-        return Err(serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!("snapshot {}", status)));
+        return Err(
+            serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!("snapshot {}", status))
+        );
     }
     let v: serde_json::Value = r.json().map_err(|e| e.to_string())?;
-    println!("{}", serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
+    );
     Ok(())
 }
 
@@ -1002,7 +1013,10 @@ fn print_player_session_pretty(session: &PlayerSession) -> Result<(), String> {
     let mut m = serde_json::to_value(st).map_err(|e| e.to_string())?;
     if let Some(ref pv) = session.private_view {
         if let Some(obj) = m.as_object_mut() {
-            obj.insert("private".into(), serde_json::to_value(pv).map_err(|e| e.to_string())?);
+            obj.insert(
+                "private".into(),
+                serde_json::to_value(pv).map_err(|e| e.to_string())?,
+            );
         }
     }
     println!(
@@ -1031,7 +1045,9 @@ fn http_get_snapshot_parsed(
     let status = r.status();
     if !status.is_success() {
         let v: serde_json::Value = r.json().unwrap_or(json!({}));
-        return Err(serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!("snapshot {}", status)));
+        return Err(
+            serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!("snapshot {}", status))
+        );
     }
     r.json::<SnapshotApiBody>().map_err(|e| e.to_string())
 }
@@ -1139,10 +1155,15 @@ fn play_suggest(
     let status = r.status();
     if !status.is_success() {
         let v: serde_json::Value = r.json().unwrap_or(json!({}));
-        return Err(serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!("suggest {}", status)));
+        return Err(
+            serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!("suggest {}", status))
+        );
     }
     let v: serde_json::Value = r.json().map_err(|e| e.to_string())?;
-    println!("{}", serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
+    );
     Ok(())
 }
 
@@ -1173,14 +1194,20 @@ fn table_join(
     }
     let v: serde_json::Value = r.json().map_err(|e| e.to_string())?;
     if no_sync {
-        println!("{}", serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
+        );
         return Ok(());
     }
     let pid = v["playerId"]
         .as_str()
         .ok_or_else(|| "join: missing playerId".to_string())?
         .to_string();
-    println!("{}", serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
+    );
     table_sync(table_id, Some(pid), None, false)
 }
 
@@ -1202,11 +1229,8 @@ fn table_nextstate(
         read_session_last_applied_seq_observer(&base, &table_id)?.unwrap_or(0)
     };
 
-    let mut u = url::Url::parse(&format!(
-        "{}/api/v1/tables/{}/nextstate",
-        base, table_id
-    ))
-    .map_err(|e| e.to_string())?;
+    let mut u = url::Url::parse(&format!("{}/api/v1/tables/{}/nextstate", base, table_id))
+        .map_err(|e| e.to_string())?;
     u.query_pairs_mut()
         .append_pair("sinceSeq", &since_seq.to_string())
         .append_pair("timeoutMs", &timeout_ms.to_string());
@@ -1223,7 +1247,10 @@ fn table_nextstate(
         s if s.is_success() => {
             let body: NextStateBody = r.json().map_err(|e| e.to_string())?;
             let v = serde_json::to_value(&body).map_err(|e| e.to_string())?;
-            println!("{}", serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
+            );
 
             if let Some(pid) = &player_id
                 && manual_seq.is_none()
@@ -1259,11 +1286,9 @@ fn table_sync(
             loop {
                 let since_seq =
                     read_session_last_applied_seq_observer(&base, &table_id)?.unwrap_or(0);
-                let mut u = url::Url::parse(&format!(
-                    "{}/api/v1/tables/{}/nextstate",
-                    base, table_id
-                ))
-                .map_err(|e| e.to_string())?;
+                let mut u =
+                    url::Url::parse(&format!("{}/api/v1/tables/{}/nextstate", base, table_id))
+                        .map_err(|e| e.to_string())?;
                 u.query_pairs_mut()
                     .append_pair("sinceSeq", &since_seq.to_string())
                     .append_pair("timeoutMs", &NEXTSTATE_TIMEOUT_MS.to_string());
@@ -1275,12 +1300,7 @@ fn table_sync(
                     }
                     s if s.is_success() => {
                         let body: NextStateBody = r.json().map_err(|e| e.to_string())?;
-                        merge_nextstate_into_observer_session(
-                            &base,
-                            &client,
-                            &table_id,
-                            &body,
-                        )?;
+                        merge_nextstate_into_observer_session(&base, &client, &table_id, &body)?;
                         if body.lag == 0 {
                             break;
                         }
@@ -1299,13 +1319,10 @@ fn table_sync(
         Some(pid) => {
             ensure_session_bootstrap(&base, &client, &table_id, pid)?;
             loop {
-                let since_seq =
-                    read_session_last_applied_seq(&base, &table_id, pid)?.unwrap_or(0);
-                let mut u = url::Url::parse(&format!(
-                    "{}/api/v1/tables/{}/nextstate",
-                    base, table_id
-                ))
-                .map_err(|e| e.to_string())?;
+                let since_seq = read_session_last_applied_seq(&base, &table_id, pid)?.unwrap_or(0);
+                let mut u =
+                    url::Url::parse(&format!("{}/api/v1/tables/{}/nextstate", base, table_id))
+                        .map_err(|e| e.to_string())?;
                 u.query_pairs_mut()
                     .append_pair("sinceSeq", &since_seq.to_string())
                     .append_pair("timeoutMs", &NEXTSTATE_TIMEOUT_MS.to_string());
@@ -1318,13 +1335,7 @@ fn table_sync(
                     }
                     s if s.is_success() => {
                         let body: NextStateBody = r.json().map_err(|e| e.to_string())?;
-                        merge_nextstate_into_session(
-                            &base,
-                            &client,
-                            &table_id,
-                            pid,
-                            &body,
-                        )?;
+                        merge_nextstate_into_session(&base, &client, &table_id, pid, &body)?;
                         if body.lag == 0 {
                             break;
                         }
@@ -1354,12 +1365,7 @@ fn play_wait4myturn(
     }
     // Catch up to server head with timeoutMs=0 nextstate loop (no long-poll at head), so the
     // local shortcut below cannot fire on a stale session while the table has moved on.
-    table_sync(
-        table_id.clone(),
-        Some(player_id.clone()),
-        None,
-        false,
-    )?;
+    table_sync(table_id.clone(), Some(player_id.clone()), None, false)?;
     let base = load_active_server_base()?;
     let client = http_client()?;
     let s0 = read_player_session(&base, &table_id, &player_id)?
@@ -1371,13 +1377,9 @@ fn play_wait4myturn(
     }
 
     loop {
-        let since_seq =
-            read_session_last_applied_seq(&base, &table_id, &player_id)?.unwrap_or(0);
-        let mut u = url::Url::parse(&format!(
-            "{}/api/v1/tables/{}/nextstate",
-            base, table_id
-        ))
-        .map_err(|e| e.to_string())?;
+        let since_seq = read_session_last_applied_seq(&base, &table_id, &player_id)?.unwrap_or(0);
+        let mut u = url::Url::parse(&format!("{}/api/v1/tables/{}/nextstate", base, table_id))
+            .map_err(|e| e.to_string())?;
         u.query_pairs_mut()
             .append_pair("sinceSeq", &since_seq.to_string())
             .append_pair("timeoutMs", &timeout_ms.to_string());
@@ -1396,13 +1398,7 @@ fn play_wait4myturn(
             }
             s if s.is_success() => {
                 let body: NextStateBody = r.json().map_err(|e| e.to_string())?;
-                merge_nextstate_into_session(
-                    &base,
-                    &client,
-                    &table_id,
-                    &player_id,
-                    &body,
-                )?;
+                merge_nextstate_into_session(&base, &client, &table_id, &player_id, &body)?;
                 let s = read_player_session(&base, &table_id, &player_id)?
                     .ok_or_else(|| "wait4myturn: missing session".to_string())?;
                 if let Some(ref st) = s.table_state {
@@ -1433,10 +1429,15 @@ fn play_ready(table_id: String, player_id: String, no_sync: bool) -> Result<(), 
     let status = r.status();
     if !status.is_success() {
         let v: serde_json::Value = r.json().unwrap_or(json!({}));
-        return Err(serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!("ready {}", status)));
+        return Err(
+            serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!("ready {}", status))
+        );
     }
     let v: serde_json::Value = r.json().map_err(|e| e.to_string())?;
-    println!("{}", serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?);
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
+    );
     if no_sync {
         return Ok(());
     }
@@ -1475,7 +1476,10 @@ fn play_action(
         let status = r.status();
         if status.is_success() {
             let v: serde_json::Value = r.json().map_err(|e| e.to_string())?;
-            println!("{}", serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
+            );
             if manual_seq.is_none() {
                 table_sync(table_id, Some(player_id), None, false)?;
             }
@@ -1496,7 +1500,7 @@ fn play_action(
             continue;
         }
         return Err(
-            serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!("{} failed", action)),
+            serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!("{} failed", action))
         );
     }
 }
@@ -1793,7 +1797,9 @@ fn simulate_cliplay_subprocess(
         })
         .count();
     if occupied > 4 {
-        return Err(format!("snapshot: invalid occupied seat count {occupied} (>4)"));
+        return Err(format!(
+            "snapshot: invalid occupied seat count {occupied} (>4)"
+        ));
     }
     let vacancy = 4usize.saturating_sub(occupied);
     let target_join = if let Some(n) = players {
@@ -1843,10 +1849,7 @@ fn simulate_cliplay_subprocess(
             "--seat".to_string(),
             "auto".to_string(),
         ];
-        println!(
-            "\n### [{label}]\n$ clawguandan {}",
-            args.join(" ")
-        );
+        println!("\n### [{label}]\n$ clawguandan {}", args.join(" "));
         let out = run_cli_command(&bin, &args).map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&out.stdout);
         println!("<< stdout:\n{stdout}");
@@ -1868,10 +1871,7 @@ fn simulate_cliplay_subprocess(
             "-p".to_string(),
             pid.clone(),
         ];
-        println!(
-            "\n### [{label}]\n$ clawguandan {}",
-            args.join(" ")
-        );
+        println!("\n### [{label}]\n$ clawguandan {}", args.join(" "));
         let out = run_cli_command(&bin, &args).map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&out.stdout);
         println!("<< stdout:\n{stdout}");
@@ -1912,10 +1912,7 @@ fn simulate_cliplay_subprocess(
                 "--timeout-ms".to_string(),
                 NEXTSTATE_TIMEOUT_MS.to_string(),
             ];
-            println!(
-                "\n### [observer] $ clawguandan {}",
-                argv.join(" ")
-            );
+            println!("\n### [observer] $ clawguandan {}", argv.join(" "));
             let out = match run_cli_command(&bin_obs, &argv) {
                 Ok(o) => o,
                 Err(e) => {
@@ -2160,7 +2157,8 @@ fn simulate_cliplay_subprocess(
     }
 
     for h in handles {
-        h.join().map_err(|_| "simulate cliplay: thread panicked".to_string())?;
+        h.join()
+            .map_err(|_| "simulate cliplay: thread panicked".to_string())?;
     }
 
     if let Some(e) = shared.err.lock().unwrap().take() {
@@ -2172,4 +2170,3 @@ fn simulate_cliplay_subprocess(
     println!("\n=== simulate cliplay done. table_id={table_id} observer_last_seq={last_seq} ===");
     Ok(())
 }
-

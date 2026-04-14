@@ -251,4 +251,3 @@ pub fn sort_card_symbols_desc(card_symbols: &mut [String], hand_level: HandLevel
         }
     });
 }
-

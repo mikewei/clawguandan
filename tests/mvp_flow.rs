@@ -5,7 +5,7 @@ use axum::http::{Request, StatusCode};
 use clawguandan::api::app_with_store;
 use clawguandan::store::TableStore;
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 async fn read_json(res: axum::response::Response) -> Value {
@@ -492,10 +492,7 @@ async fn snapshot_private_visibility() {
     assert_eq!(res.status(), StatusCode::OK);
     let snap_p = read_json(res).await;
     assert!(snap_p.get("private").is_some());
-    assert_eq!(
-        snap_p["private"]["seat"].as_str(),
-        Some(seat)
-    );
+    assert_eq!(snap_p["private"]["seat"].as_str(), Some(seat));
 }
 
 #[tokio::test]
@@ -532,14 +529,16 @@ async fn action_endpoints_advance_seq_and_emit_transition() {
                 .method("POST")
                 .uri(format!("/api/v1/tables/{}/actions/pass", table_id))
                 .header("content-type", "application/json")
-                .body(Body::from(
-                    json!({"playerId": pid, "seq": seq}).to_string(),
-                ))
+                .body(Body::from(json!({"playerId": pid, "seq": seq}).to_string()))
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::UNPROCESSABLE_ENTITY, "leader with cards cannot pass");
+    assert_eq!(
+        res.status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "leader with cards cannot pass"
+    );
 
     // Legal play: use suggest — `handCards[0]` is flaky (random table seed may put ♥2 / joker first).
     let res = app

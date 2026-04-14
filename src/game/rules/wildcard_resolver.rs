@@ -1,4 +1,4 @@
-use crate::game::card::{is_wild, parse_card_symbol, RuleContext, Suit};
+use crate::game::card::{RuleContext, Suit, is_wild, parse_card_symbol};
 
 pub struct WildcardResolver;
 
@@ -8,7 +8,10 @@ impl WildcardResolver {
         wild_targets: Option<&[String]>,
         ctx: RuleContext,
     ) -> Result<Vec<crate::game::card::Card>, String> {
-        let parsed: Vec<_> = cards.iter().map(|s| parse_card_symbol(s)).collect::<Result<_, _>>()?;
+        let parsed: Vec<_> = cards
+            .iter()
+            .map(|s| parse_card_symbol(s))
+            .collect::<Result<_, _>>()?;
         let wild_count = parsed.iter().filter(|c| is_wild(**c, ctx)).count();
 
         let targets = wild_targets.unwrap_or(&[]);
@@ -47,7 +50,9 @@ mod tests {
     fn reject_joker_target_for_wild() {
         let cards = vec!["♥2".to_string()];
         let targets = vec!["🃏R".to_string()];
-        let ctx = RuleContext { hand_level: HandLevel::Two };
+        let ctx = RuleContext {
+            hand_level: HandLevel::Two,
+        };
         let err = WildcardResolver::resolve(&cards, Some(&targets), ctx).unwrap_err();
         assert!(err.contains("cannot represent joker"));
     }
@@ -74,4 +79,3 @@ mod tests {
         assert_eq!(out.len(), 1);
     }
 }
-

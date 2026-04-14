@@ -9,7 +9,7 @@ use clawguandan::game::test_support::TestFixtures;
 use clawguandan::game::types::{GameConfig, GamePhase};
 use clawguandan::store::TableStore;
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 async fn read_json(res: axum::response::Response) -> Value {
@@ -175,10 +175,17 @@ async fn full_hand_four_players_until_scoring() {
         snap["narration"]
     );
     for seat in ["E", "S", "W", "N"] {
-        assert_eq!(snap["seats"][seat]["ready"], false, "seat {seat} should be reset");
+        assert_eq!(
+            snap["seats"][seat]["ready"], false,
+            "seat {seat} should be reset"
+        );
     }
     let hist = snap["hand"]["history"].as_array().expect("hand.history");
-    assert_eq!(hist.len(), 1, "expected a single winning play in hand.history");
+    assert_eq!(
+        hist.len(),
+        1,
+        "expected a single winning play in hand.history"
+    );
 
     for (idx, pid) in pids.iter().enumerate() {
         let res = app

@@ -107,7 +107,12 @@ fn cli_argv_table_nextstate_matches_cli() {
 fn cli_argv_table_snapshot_optional_player() {
     assert_eq!(
         cli_argv_table_snapshot("t_abc", None),
-        vec!["table".to_string(), "snapshot".to_string(), "-t".to_string(), "t_abc".to_string()]
+        vec![
+            "table".to_string(),
+            "snapshot".to_string(),
+            "-t".to_string(),
+            "t_abc".to_string()
+        ]
     );
     assert_eq!(
         cli_argv_table_snapshot("t_abc", Some("p1")),
@@ -144,10 +149,7 @@ fn simulate_cliplay_help_includes_table_and_players_flags() {
 fn simulate_cliplay_one_hand_exits_zero() {
     use std::io::Read;
 
-    let home = std::env::temp_dir().join(format!(
-        "clawguandan_sim_cliplay_{}",
-        std::process::id()
-    ));
+    let home = std::env::temp_dir().join(format!("clawguandan_sim_cliplay_{}", std::process::id()));
     std::fs::create_dir_all(&home).expect("temp home");
     let home = home.as_path();
 
@@ -156,14 +158,7 @@ fn simulate_cliplay_one_hand_exits_zero() {
 
     let mut server = Command::new(cargo_bin())
         .env("HOME", home)
-        .args([
-            "server",
-            "serve",
-            "--ip",
-            addr,
-            "--port",
-            &port.to_string(),
-        ])
+        .args(["server", "serve", "--ip", addr, "--port", &port.to_string()])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -243,14 +238,7 @@ fn simulate_cliplay_existing_table_with_players_flag() {
 
     let mut server = Command::new(cargo_bin())
         .env("HOME", home)
-        .args([
-            "server",
-            "serve",
-            "--ip",
-            addr,
-            "--port",
-            &port.to_string(),
-        ])
+        .args(["server", "serve", "--ip", addr, "--port", &port.to_string()])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -324,14 +312,7 @@ fn simulate_cliplay_existing_full_table_without_players_fails() {
 
     let mut server = Command::new(cargo_bin())
         .env("HOME", home)
-        .args([
-            "server",
-            "serve",
-            "--ip",
-            addr,
-            "--port",
-            &port.to_string(),
-        ])
+        .args(["server", "serve", "--ip", addr, "--port", &port.to_string()])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

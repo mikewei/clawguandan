@@ -134,7 +134,8 @@ impl ScoringService {
         let declarer_is_a = declarer_prog.level == Level::A;
 
         // A-level terminal win: declarer wins by 1-2 or 1-3.
-        if declarer_is_a && declarer_won && matches!(win_type, WinType::OneTwo | WinType::OneThree) {
+        if declarer_is_a && declarer_won && matches!(win_type, WinType::OneTwo | WinType::OneThree)
+        {
             return Ok(GameOutcome {
                 winner_team: Some(declarer),
                 next_declarer: declarer,
@@ -208,7 +209,9 @@ mod tests {
     fn a_level_declarer_wins_12_game_over() {
         let ew = prog(TeamId::Ew, Level::A, 0);
         let sn = prog(TeamId::Sn, Level::K, 0);
-        let out = ScoringService::apply_hand(ew, sn, TeamId::Ew, TeamId::Ew, WinType::OneTwo, false).unwrap();
+        let out =
+            ScoringService::apply_hand(ew, sn, TeamId::Ew, TeamId::Ew, WinType::OneTwo, false)
+                .unwrap();
         assert_eq!(out.winner_team, Some(TeamId::Ew));
     }
 
@@ -216,7 +219,9 @@ mod tests {
     fn a_level_declarer_14_increments_fail_and_demotes_on_third() {
         let ew = prog(TeamId::Ew, Level::A, 2);
         let sn = prog(TeamId::Sn, Level::Q, 0);
-        let out = ScoringService::apply_hand(ew, sn, TeamId::Ew, TeamId::Ew, WinType::OneFour, false).unwrap();
+        let out =
+            ScoringService::apply_hand(ew, sn, TeamId::Ew, TeamId::Ew, WinType::OneFour, false)
+                .unwrap();
         assert_eq!(out.winner_team, None);
         assert_eq!(out.progress_ew.level, Level::Two);
         assert_eq!(out.progress_ew.ace_failed_attempts, 0);
@@ -226,7 +231,9 @@ mod tests {
     fn a_level_declarer_loses_and_ace_finish_demotes_to_two() {
         let ew = prog(TeamId::Ew, Level::A, 1);
         let sn = prog(TeamId::Sn, Level::Ten, 0);
-        let out = ScoringService::apply_hand(ew, sn, TeamId::Ew, TeamId::Sn, WinType::OneThree, true).unwrap();
+        let out =
+            ScoringService::apply_hand(ew, sn, TeamId::Ew, TeamId::Sn, WinType::OneThree, true)
+                .unwrap();
         assert_eq!(out.progress_ew.level, Level::Two);
         assert_eq!(out.progress_ew.ace_failed_attempts, 0);
     }
@@ -235,7 +242,9 @@ mod tests {
     fn non_a_winner_promotes_by_win_type() {
         let ew = prog(TeamId::Ew, Level::Five, 0);
         let sn = prog(TeamId::Sn, Level::K, 0);
-        let out = ScoringService::apply_hand(ew, sn, TeamId::Ew, TeamId::Sn, WinType::OneTwo, false).unwrap();
+        let out =
+            ScoringService::apply_hand(ew, sn, TeamId::Ew, TeamId::Sn, WinType::OneTwo, false)
+                .unwrap();
         assert_eq!(out.progress_sn.level, Level::A);
     }
 
@@ -245,4 +254,3 @@ mod tests {
         assert_eq!(Level::A.promote_by(4), Level::A);
     }
 }
-

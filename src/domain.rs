@@ -1,13 +1,13 @@
 //! Domain types aligned with [doc/design.md](../doc/design.md) — MVP subset.
 
-use crate::game::card::{sort_card_symbols_desc, HandLevel};
+use crate::game::card::{HandLevel, sort_card_symbols_desc};
 use crate::game::rules::scoring::{Level, TeamProgress};
 use crate::game::types::{GameConfig, GamePhase, HistoryActionKind, TableGameState, TeamId};
 use serde::de::Error as SerdeDeError;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::json;
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 /// Seat position in turn order.
@@ -281,6 +281,14 @@ pub struct TableRuntimeState {
 
 impl TableRuntimeState {
     pub fn new(table_id: String, table_name: Option<String>) -> Self {
+        Self::new_with_level(table_id, table_name, Level::Two)
+    }
+
+    pub fn new_with_level(
+        table_id: String,
+        table_name: Option<String>,
+        start_level: Level,
+    ) -> Self {
         let mut seats = HashMap::new();
         for s in Seat::ALL {
             seats.insert(s, None);
@@ -296,12 +304,12 @@ impl TableRuntimeState {
             game_config: GameConfig::default(),
             team_progress_ew: TeamProgress {
                 team: TeamId::Ew,
-                level: Level::Two,
+                level: start_level,
                 ace_failed_attempts: 0,
             },
             team_progress_sn: TeamProgress {
                 team: TeamId::Sn,
-                level: Level::Two,
+                level: start_level,
                 ace_failed_attempts: 0,
             },
             current_declarer: TeamId::Ew,
@@ -548,10 +556,7 @@ impl TableRuntimeState {
             player_id: player_id.to_string(),
             seat: seat.as_str().to_string(),
             hand_cards,
-            play_hints: PlayHints {
-                can_play,
-                can_pass,
-            },
+            play_hints: PlayHints { can_play, can_pass },
         })
     }
 
@@ -718,7 +723,10 @@ fn json_pointer_encode_segment(seg: &str) -> String {
 
 /// When `history` only grows by a tail suffix and key set matches, emit `add` for new items
 /// and `replace` for other changed `/hand/*` keys; otherwise `None` (caller uses full `/hand` replace).
-fn try_hand_incremental_ops(prev_hand: &serde_json::Value, next_hand: &serde_json::Value) -> Option<Vec<serde_json::Value>> {
+fn try_hand_incremental_ops(
+    prev_hand: &serde_json::Value,
+    next_hand: &serde_json::Value,
+) -> Option<Vec<serde_json::Value>> {
     let prev_obj = prev_hand.as_object()?;
     let next_obj = next_hand.as_object()?;
     let ph = prev_obj.get("history")?.as_array()?;
@@ -800,7 +808,11 @@ fn json_pointer_token(token: &str) -> String {
     token.replace("~1", "/").replace("~0", "~")
 }
 
-fn apply_one_replace(root: &mut serde_json::Value, path: &str, value: serde_json::Value) -> Result<(), String> {
+fn apply_one_replace(
+    root: &mut serde_json::Value,
+    path: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
     if !path.starts_with('/') {
         return Err(format!("path must start with /: {path:?}"));
     }
@@ -834,7 +846,11 @@ fn apply_one_replace(root: &mut serde_json::Value, path: &str, value: serde_json
     Ok(())
 }
 
-fn apply_one_add(root: &mut serde_json::Value, path: &str, value: serde_json::Value) -> Result<(), String> {
+fn apply_one_add(
+    root: &mut serde_json::Value,
+    path: &str,
+    value: serde_json::Value,
+) -> Result<(), String> {
     if !path.starts_with('/') {
         return Err(format!("path must start with /: {path:?}"));
     }
@@ -858,7 +874,8 @@ fn apply_one_add(root: &mut serde_json::Value, path: &str, value: serde_json::Va
             .as_object_mut()
             .ok_or_else(|| format!("add: not an object at parent segment {i} of {path:?}"))?;
         cur = if is_last {
-            m.get_mut(seg).ok_or_else(|| format!("add: missing key {seg:?} in {path:?}"))?
+            m.get_mut(seg)
+                .ok_or_else(|| format!("add: missing key {seg:?} in {path:?}"))?
         } else {
             m.entry(seg.clone()).or_insert_with(|| json!({}))
         };
@@ -881,7 +898,10 @@ fn apply_delta_ops(root: &mut serde_json::Value, ops: &[serde_json::Value]) -> R
             .get("path")
             .and_then(|x| x.as_str())
             .ok_or_else(|| format!("missing path: {op}"))?;
-        let value = op.get("value").cloned().ok_or_else(|| format!("missing value: {op}"))?;
+        let value = op
+            .get("value")
+            .cloned()
+            .ok_or_else(|| format!("missing value: {op}"))?;
         match kind {
             "replace" => apply_one_replace(root, path, value)?,
             "add" => apply_one_add(root, path, value)?,

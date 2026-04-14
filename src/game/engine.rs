@@ -1,11 +1,11 @@
 use crate::domain::Seat;
 use crate::game::card::{
-    is_wild, level_order_value, parse_card_symbol, sort_card_symbols_desc, to_card_symbol,
-    HandLevel, RuleContext,
+    HandLevel, RuleContext, is_wild, level_order_value, parse_card_symbol, sort_card_symbols_desc,
+    to_card_symbol,
 };
 use crate::game::deck::Deck;
 use crate::game::rules::beat_comparator::BeatComparator;
-use crate::game::rules::combination_parser::{combination_kind_api_type, CombinationParser};
+use crate::game::rules::combination_parser::{CombinationParser, combination_kind_api_type};
 use crate::game::rules::wild_target_infer::WildTargetInfer;
 use crate::game::types::{
     GameConfig, GamePhase, HandCommitMeta, HandHistoryEntry, HandState, HistoryActionKind,
@@ -15,9 +15,16 @@ use serde_json::json;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlayerAction {
-    Tribute { card: String },
-    ReturnCard { card: String },
-    Play { cards: Vec<String>, wild_targets: Option<Vec<String>> },
+    Tribute {
+        card: String,
+    },
+    ReturnCard {
+        card: String,
+    },
+    Play {
+        cards: Vec<String>,
+        wild_targets: Option<Vec<String>>,
+    },
     Pass,
 }
 
@@ -83,10 +90,7 @@ impl PlayerAction {
                 v["declaredWildMapping"] = json!({ "wildTargets": wt });
                 ("play", v)
             }
-            PlayerAction::Pass => (
-                "pass",
-                json!({ "playerId": player_id, "seq": seq }),
-            ),
+            PlayerAction::Pass => ("pass", json!({ "playerId": player_id, "seq": seq })),
         }
     }
 
@@ -169,10 +173,11 @@ impl GameEngine {
         &self,
         state: &mut TableGameState,
         first_drawer: Seat,
+        hand_level: HandLevel,
     ) -> Result<(), String> {
         state.hand_index += 1;
         state.phase = GamePhase::Dealing;
-        let mut hand = HandState::new(HandLevel::Two);
+        let mut hand = HandState::new(hand_level);
         let deck = Deck::new_shuffled_double_deck(self.cfg.rng_seed + state.hand_index as u64);
         let dealt = deck.deal_27_each_ccw_from(first_drawer);
         for s in Seat::ALL {
@@ -202,7 +207,9 @@ impl GameEngine {
         state.phase = GamePhase::Dealing;
         let mut hand = HandState::new(hand_level);
         let deck = Deck::new_shuffled_double_deck(self.cfg.rng_seed + state.hand_index as u64);
-        let first_drawer = *last_finishing_order.last().ok_or_else(|| "missing finishing order".to_string())?;
+        let first_drawer = *last_finishing_order
+            .last()
+            .ok_or_else(|| "missing finishing order".to_string())?;
         let dealt = deck.deal_27_each_ccw_from(first_drawer);
         for s in Seat::ALL {
             let cards = dealt
@@ -228,9 +235,15 @@ impl GameEngine {
         actor: Seat,
         action: PlayerAction,
     ) -> Result<(), String> {
-        let hand = state.hand.as_mut().ok_or_else(|| "missing hand".to_string())?;
+        let hand = state
+            .hand
+            .as_mut()
+            .ok_or_else(|| "missing hand".to_string())?;
         ensure_tribute_phase_ready(hand)?;
-        let tribute = hand.tribute.as_ref().ok_or_else(|| "missing tribute plan".to_string())?;
+        let tribute = hand
+            .tribute
+            .as_ref()
+            .ok_or_else(|| "missing tribute plan".to_string())?;
         if tribute.canceled {
             state.phase = GamePhase::Playing;
             if let Some(s) = tribute.opening_lead_candidates.first().copied() {
@@ -243,7 +256,10 @@ impl GameEngine {
             return Err("only tribute action allowed".into());
         };
         ensure_is_highest_non_wild(hand, actor, &card)?;
-        let tribute = hand.tribute.as_mut().ok_or_else(|| "missing tribute plan".to_string())?;
+        let tribute = hand
+            .tribute
+            .as_mut()
+            .ok_or_else(|| "missing tribute plan".to_string())?;
         let pair = tribute
             .pairs
             .iter_mut()
@@ -264,8 +280,14 @@ impl GameEngine {
         actor: Seat,
         action: PlayerAction,
     ) -> Result<(), String> {
-        let hand = state.hand.as_mut().ok_or_else(|| "missing hand".to_string())?;
-        let tribute = hand.tribute.as_mut().ok_or_else(|| "missing tribute plan".to_string())?;
+        let hand = state
+            .hand
+            .as_mut()
+            .ok_or_else(|| "missing hand".to_string())?;
+        let tribute = hand
+            .tribute
+            .as_mut()
+            .ok_or_else(|| "missing tribute plan".to_string())?;
         if tribute.canceled {
             state.phase = GamePhase::Playing;
             return Ok(());
@@ -278,7 +300,10 @@ impl GameEngine {
             .iter_mut()
             .find(|p| p.receiver == actor && p.return_card.is_none())
             .ok_or_else(|| "player is not expected to return card".to_string())?;
-        let paid = pair.paid_card.clone().ok_or_else(|| "tribute not yet paid".to_string())?;
+        let paid = pair
+            .paid_card
+            .clone()
+            .ok_or_else(|| "tribute not yet paid".to_string())?;
         let paid_rank = parse_card_symbol(&paid)?.rank;
         let return_rank = parse_card_symbol(&card)?.rank;
         if paid_rank == return_rank {
@@ -289,11 +314,17 @@ impl GameEngine {
         // exchange: receiver gives card to payer
         hand.hands.get_mut(&pair.payer).expect("payer").push(card);
         // payer gives tribute card to receiver
-        hand.hands.get_mut(&pair.receiver).expect("receiver").push(paid);
+        hand.hands
+            .get_mut(&pair.receiver)
+            .expect("receiver")
+            .push(paid);
 
         if tribute.pairs.iter().all(|p| p.return_card.is_some()) {
             state.phase = GamePhase::Playing;
-            let lead = tie_break_opening_leader(tribute.opening_lead_candidates[0], &tribute.opening_lead_candidates);
+            let lead = tie_break_opening_leader(
+                tribute.opening_lead_candidates[0],
+                &tribute.opening_lead_candidates,
+            );
             state.turn_seat = lead;
             state.leader_seat = lead;
         }
@@ -310,7 +341,10 @@ impl GameEngine {
         if state.turn_seat != actor {
             return Err("wrong turn".into());
         }
-        let hand = state.hand.as_mut().ok_or_else(|| "missing hand".to_string())?;
+        let hand = state
+            .hand
+            .as_mut()
+            .ok_or_else(|| "missing hand".to_string())?;
         let ctx = RuleContext {
             hand_level: hand.hand_level,
         };
@@ -323,7 +357,10 @@ impl GameEngine {
         }
 
         match action {
-            PlayerAction::Play { cards, wild_targets } => {
+            PlayerAction::Play {
+                cards,
+                wild_targets,
+            } => {
                 if cards.is_empty() {
                     return Err("empty play".into());
                 }
@@ -393,11 +430,13 @@ impl GameEngine {
                 hand.trick.consecutive_passes = hand.trick.consecutive_passes.saturating_add(1);
                 state.turn_seat = next_active_ccw(hand, actor);
 
-                let required_passes =
-                    passes_required_to_end_trick(hand, hand.trick.last_play_seat);
+                let required_passes = passes_required_to_end_trick(hand, hand.trick.last_play_seat);
                 if hand.trick.consecutive_passes >= required_passes {
                     // Trick ends; last successful play leads next trick.
-                    let lead = hand.trick.last_play_seat.ok_or_else(|| "trick ended without a play".to_string())?;
+                    let lead = hand
+                        .trick
+                        .last_play_seat
+                        .ok_or_else(|| "trick ended without a play".to_string())?;
                     hand.trick.top_play = None;
                     hand.trick.consecutive_passes = 0;
                     state.turn_seat = lead;
@@ -429,13 +468,13 @@ impl GameEngine {
             }
         }
 
-        // Hand end: one team both empty.
+        // Hand end: one team both empty; that team wins the hand.
         if is_team_empty(hand, TeamId::Ew) || is_team_empty(hand, TeamId::Sn) {
             state.phase = GamePhase::Scoring;
             state.winner_team = if is_team_empty(hand, TeamId::Ew) {
-                Some(TeamId::Sn)
-            } else {
                 Some(TeamId::Ew)
+            } else {
+                Some(TeamId::Sn)
             };
         }
 
@@ -452,9 +491,14 @@ fn ensure_tribute_phase_ready(hand: &HandState) -> Result<(), String> {
 }
 
 fn ensure_is_highest_non_wild(hand: &HandState, seat: Seat, card: &str) -> Result<(), String> {
-    let ctx = RuleContext { hand_level: hand.hand_level };
+    let ctx = RuleContext {
+        hand_level: hand.hand_level,
+    };
     let parsed = parse_card_symbol(card)?;
-    let h = hand.hands.get(&seat).ok_or_else(|| "missing seat".to_string())?;
+    let h = hand
+        .hands
+        .get(&seat)
+        .ok_or_else(|| "missing seat".to_string())?;
     if !h.iter().any(|c| c == card) {
         return Err("tribute card not in hand".into());
     }
@@ -481,11 +525,23 @@ fn seat_team(seat: Seat) -> TeamId {
     }
 }
 
-fn build_tribute_plan(hand: &HandState, declarer: TeamId, finishing: &[Seat]) -> Result<TributeState, String> {
-    let winner_first = *finishing.first().ok_or_else(|| "empty finishing order".to_string())?;
-    let winner_second = *finishing.get(1).ok_or_else(|| "finishing order too short".to_string())?;
-    let loser_third = *finishing.get(2).ok_or_else(|| "finishing order too short".to_string())?;
-    let loser_last = *finishing.get(3).ok_or_else(|| "finishing order too short".to_string())?;
+fn build_tribute_plan(
+    hand: &HandState,
+    declarer: TeamId,
+    finishing: &[Seat],
+) -> Result<TributeState, String> {
+    let winner_first = *finishing
+        .first()
+        .ok_or_else(|| "empty finishing order".to_string())?;
+    let winner_second = *finishing
+        .get(1)
+        .ok_or_else(|| "finishing order too short".to_string())?;
+    let loser_third = *finishing
+        .get(2)
+        .ok_or_else(|| "finishing order too short".to_string())?;
+    let loser_last = *finishing
+        .get(3)
+        .ok_or_else(|| "finishing order too short".to_string())?;
 
     let win_type = if seat_team(winner_second) == seat_team(winner_first) {
         WinCase::OneTwo
@@ -499,11 +555,26 @@ fn build_tribute_plan(hand: &HandState, declarer: TeamId, finishing: &[Seat]) ->
     match win_type {
         WinCase::OneTwo => {
             // losers (3rd,4th) each tribute to winners (1st,2nd)
-            pairs.push(TributePair { payer: loser_third, receiver: winner_first, paid_card: None, return_card: None });
-            pairs.push(TributePair { payer: loser_last, receiver: winner_second, paid_card: None, return_card: None });
+            pairs.push(TributePair {
+                payer: loser_third,
+                receiver: winner_first,
+                paid_card: None,
+                return_card: None,
+            });
+            pairs.push(TributePair {
+                payer: loser_last,
+                receiver: winner_second,
+                paid_card: None,
+                return_card: None,
+            });
         }
         WinCase::OneThree | WinCase::OneFour => {
-            pairs.push(TributePair { payer: loser_last, receiver: winner_first, paid_card: None, return_card: None });
+            pairs.push(TributePair {
+                payer: loser_last,
+                receiver: winner_first,
+                paid_card: None,
+                return_card: None,
+            });
         }
     }
 
@@ -526,14 +597,27 @@ fn build_tribute_plan(hand: &HandState, declarer: TeamId, finishing: &[Seat]) ->
     };
 
     let _ = declarer; // reserved for future declarer-specific variants.
-    Ok(TributeState { pairs, canceled, opening_lead_candidates })
+    Ok(TributeState {
+        pairs,
+        canceled,
+        opening_lead_candidates,
+    })
 }
 
 #[derive(Clone, Copy)]
-enum WinCase { OneTwo, OneThree, OneFour }
+enum WinCase {
+    OneTwo,
+    OneThree,
+    OneFour,
+}
 
 fn tie_break_opening_leader(reference: Seat, candidates: &[Seat]) -> Seat {
-    let order = [reference, next_ccw(reference), next_ccw(next_ccw(reference)), next_ccw(next_ccw(next_ccw(reference)))];
+    let order = [
+        reference,
+        next_ccw(reference),
+        next_ccw(next_ccw(reference)),
+        next_ccw(next_ccw(next_ccw(reference))),
+    ];
     for s in order {
         if candidates.contains(&s) {
             return s;
@@ -619,7 +703,9 @@ fn remove_cards_from_hand(
     seat: Seat,
     cards: &[String],
 ) -> Result<(), String> {
-    let h = hands.get_mut(&seat).ok_or_else(|| "missing seat hand".to_string())?;
+    let h = hands
+        .get_mut(&seat)
+        .ok_or_else(|| "missing seat hand".to_string())?;
     // multiset removal: for each card symbol, remove one occurrence.
     for c in cards {
         if let Some(pos) = h.iter().position(|x| x == c) {
@@ -636,7 +722,9 @@ fn ensure_cards_in_hand_multiset(
     seat: Seat,
     cards: &[String],
 ) -> Result<(), String> {
-    let h = hands.get(&seat).ok_or_else(|| "missing seat hand".to_string())?;
+    let h = hands
+        .get(&seat)
+        .ok_or_else(|| "missing seat hand".to_string())?;
     let mut counts: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
     for c in h {
         *counts.entry(c.as_str()).or_insert(0) += 1;
@@ -712,14 +800,26 @@ mod tests {
         hand.hands.insert(Seat::W, vec!["♠5".into()]);
         hand.hands.insert(Seat::N, vec!["♠6".into()]);
         hand.tribute = Some(TributeState {
-            pairs: vec![TributePair { payer: Seat::E, receiver: Seat::S, paid_card: None, return_card: None }],
+            pairs: vec![TributePair {
+                payer: Seat::E,
+                receiver: Seat::S,
+                paid_card: None,
+                return_card: None,
+            }],
             canceled: false,
             opening_lead_candidates: vec![Seat::E],
         });
         s.phase = GamePhase::Tribute;
         s.hand = Some(hand);
         let err = eng
-            .apply_player_action(&mut s, Seat::E, PlayerAction::Tribute { card: "♣3".into() }, None)
+            .apply_player_action(
+                &mut s,
+                Seat::E,
+                PlayerAction::Tribute {
+                    card: "♣3".into()
+                },
+                None,
+            )
             .unwrap_err();
         assert!(err.contains("highest non-wild"));
     }
@@ -772,14 +872,13 @@ mod tests {
     fn next_hand_uses_passed_hand_level() {
         let eng = GameEngine::new(GameConfig::default());
         let mut s = TableGameState::new("t_level".into());
-        eng
-            .start_next_hand_with_tribute(
-                &mut s,
-                TeamId::Ew,
-                HandLevel::Eight,
-                &[Seat::E, Seat::S, Seat::W, Seat::N],
-            )
-            .unwrap();
+        eng.start_next_hand_with_tribute(
+            &mut s,
+            TeamId::Ew,
+            HandLevel::Eight,
+            &[Seat::E, Seat::S, Seat::W, Seat::N],
+        )
+        .unwrap();
         assert_eq!(s.hand.as_ref().unwrap().hand_level, HandLevel::Eight);
     }
 
@@ -794,7 +893,14 @@ mod tests {
         );
         set_top_play(hand, Seat::N, vec!["♠7", "♥7", "♦7", "♣7"]);
 
-        let before = s.hand.as_ref().unwrap().hands.get(&Seat::E).unwrap().clone();
+        let before = s
+            .hand
+            .as_ref()
+            .unwrap()
+            .hands
+            .get(&Seat::E)
+            .unwrap()
+            .clone();
         let err = eng
             .apply_player_action(
                 &mut s,
@@ -807,7 +913,14 @@ mod tests {
             )
             .unwrap_err();
         assert!(err.contains("unsupported combination length"));
-        let after = s.hand.as_ref().unwrap().hands.get(&Seat::E).unwrap().clone();
+        let after = s
+            .hand
+            .as_ref()
+            .unwrap()
+            .hands
+            .get(&Seat::E)
+            .unwrap()
+            .clone();
         assert_eq!(after, before);
     }
 
@@ -819,7 +932,14 @@ mod tests {
         hand.hands.insert(Seat::E, vec!["♠6".into(), "♦3".into()]);
         set_top_play(hand, Seat::N, vec!["♠7"]);
 
-        let before = s.hand.as_ref().unwrap().hands.get(&Seat::E).unwrap().clone();
+        let before = s
+            .hand
+            .as_ref()
+            .unwrap()
+            .hands
+            .get(&Seat::E)
+            .unwrap()
+            .clone();
         let err = eng
             .apply_player_action(
                 &mut s,
@@ -832,7 +952,14 @@ mod tests {
             )
             .unwrap_err();
         assert!(err.contains("does not beat"));
-        let after = s.hand.as_ref().unwrap().hands.get(&Seat::E).unwrap().clone();
+        let after = s
+            .hand
+            .as_ref()
+            .unwrap()
+            .hands
+            .get(&Seat::E)
+            .unwrap()
+            .clone();
         assert_eq!(after, before);
     }
 
@@ -841,7 +968,14 @@ mod tests {
         let eng = GameEngine::new(GameConfig::default());
         let mut s = mk_state_playing();
 
-        let before = s.hand.as_ref().unwrap().hands.get(&Seat::E).unwrap().clone();
+        let before = s
+            .hand
+            .as_ref()
+            .unwrap()
+            .hands
+            .get(&Seat::E)
+            .unwrap()
+            .clone();
         let err = eng
             .apply_player_action(
                 &mut s,
@@ -854,7 +988,14 @@ mod tests {
             )
             .unwrap_err();
         assert!(err.contains("not in hand"));
-        let after = s.hand.as_ref().unwrap().hands.get(&Seat::E).unwrap().clone();
+        let after = s
+            .hand
+            .as_ref()
+            .unwrap()
+            .hands
+            .get(&Seat::E)
+            .unwrap()
+            .clone();
         assert_eq!(after, before);
     }
 
@@ -865,17 +1006,16 @@ mod tests {
         let hand = s.hand.as_mut().unwrap();
         hand.hands.insert(Seat::E, vec!["♥3".into()]);
 
-        eng
-            .apply_player_action(
-                &mut s,
-                Seat::E,
-                PlayerAction::Play {
-                    cards: vec!["♥3".into()],
-                    wild_targets: None,
-                },
-                None,
-            )
-            .unwrap();
+        eng.apply_player_action(
+            &mut s,
+            Seat::E,
+            PlayerAction::Play {
+                cards: vec!["♥3".into()],
+                wild_targets: None,
+            },
+            None,
+        )
+        .unwrap();
 
         let top = &s.hand.as_ref().unwrap().trick.top_play.as_ref().unwrap();
         assert!(top.wild_targets.is_some());
@@ -890,21 +1030,25 @@ mod tests {
         hand.hands.insert(Seat::E, vec!["♥3".into(), "♠J".into()]);
         set_top_play(hand, Seat::N, vec!["♠10", "♦10"]);
 
-        eng
-            .apply_player_action(
-                &mut s,
-                Seat::E,
-                PlayerAction::Play {
-                    cards: vec!["♥3".into(), "♠J".into()],
-                    wild_targets: None,
-                },
-                None,
-            )
-            .unwrap();
+        eng.apply_player_action(
+            &mut s,
+            Seat::E,
+            PlayerAction::Play {
+                cards: vec!["♥3".into(), "♠J".into()],
+                wild_targets: None,
+            },
+            None,
+        )
+        .unwrap();
 
         let top = &s.hand.as_ref().unwrap().trick.top_play.as_ref().unwrap();
         assert!(top.wild_targets.is_some());
-        assert_eq!(top.combination.kind, crate::game::rules::combination_parser::CombinationKind::Ordinary(crate::game::rules::combination_parser::OrdinaryKind::Pair));
+        assert_eq!(
+            top.combination.kind,
+            crate::game::rules::combination_parser::CombinationKind::Ordinary(
+                crate::game::rules::combination_parser::OrdinaryKind::Pair
+            )
+        );
     }
 
     #[test]
@@ -915,26 +1059,26 @@ mod tests {
         s.turn_seat = Seat::E;
         s.leader_seat = Seat::E;
         let mut hand = HandState::new(HandLevel::Two);
-        hand.hands.insert(Seat::E, vec!["♣A".into(), "♥A".into(), "♠A".into()]);
+        hand.hands
+            .insert(Seat::E, vec!["♣A".into(), "♥A".into(), "♠A".into()]);
         hand.hands.insert(Seat::S, vec![]);
         hand.hands.insert(Seat::W, vec![]);
         hand.hands.insert(Seat::N, vec![]);
         s.hand = Some(hand);
 
-        eng
-            .apply_player_action(
-                &mut s,
-                Seat::E,
-                PlayerAction::Play {
-                    cards: vec!["♣A".into(), "♥A".into(), "♠A".into()],
-                    wild_targets: None,
-                },
-                Some(HandCommitMeta {
-                    seq: 1,
-                    timestamp: "2026-01-01T00:00:00Z".into(),
-                }),
-            )
-            .unwrap();
+        eng.apply_player_action(
+            &mut s,
+            Seat::E,
+            PlayerAction::Play {
+                cards: vec!["♣A".into(), "♥A".into(), "♠A".into()],
+                wild_targets: None,
+            },
+            Some(HandCommitMeta {
+                seq: 1,
+                timestamp: "2026-01-01T00:00:00Z".into(),
+            }),
+        )
+        .unwrap();
 
         let hand = s.hand.as_ref().unwrap();
         let top = hand.trick.top_play.as_ref().unwrap();
@@ -957,17 +1101,16 @@ mod tests {
         hand.hands.insert(Seat::S, vec!["♠5".into()]);
         s.hand = Some(hand);
 
-        eng
-            .apply_player_action(
-                &mut s,
-                Seat::E,
-                PlayerAction::Play {
-                    cards: vec!["♠3".into()],
-                    wild_targets: None,
-                },
-                None,
-            )
-            .unwrap();
+        eng.apply_player_action(
+            &mut s,
+            Seat::E,
+            PlayerAction::Play {
+                cards: vec!["♠3".into()],
+                wild_targets: None,
+            },
+            None,
+        )
+        .unwrap();
 
         assert_eq!(s.turn_seat, Seat::W);
         let hand = s.hand.as_ref().unwrap();
@@ -989,14 +1132,12 @@ mod tests {
         set_top_play(&mut hand, Seat::E, vec!["♠6"]);
         s.hand = Some(hand);
 
-        eng
-            .apply_player_action(&mut s, Seat::N, PlayerAction::Pass, None)
+        eng.apply_player_action(&mut s, Seat::N, PlayerAction::Pass, None)
             .unwrap();
         assert_eq!(s.turn_seat, Seat::W);
         assert!(s.hand.as_ref().unwrap().trick.top_play.is_some());
 
-        eng
-            .apply_player_action(&mut s, Seat::W, PlayerAction::Pass, None)
+        eng.apply_player_action(&mut s, Seat::W, PlayerAction::Pass, None)
             .unwrap();
         let hand = s.hand.as_ref().unwrap();
         assert!(hand.trick.top_play.is_none());
@@ -1010,51 +1151,42 @@ mod tests {
         let eng = GameEngine::new(GameConfig::default());
         let mut s = TestFixtures::table_game_playing_four_singles_endgame();
         assert_eq!(s.phase, GamePhase::Playing);
-        eng
-            .apply_player_action(
-                &mut s,
-                Seat::E,
-                PlayerAction::Play {
-                    cards: vec!["♠3".into()],
-                    wild_targets: None,
-                },
-                None,
-            )
+        eng.apply_player_action(
+            &mut s,
+            Seat::E,
+            PlayerAction::Play {
+                cards: vec!["♠3".into()],
+                wild_targets: None,
+            },
+            None,
+        )
+        .unwrap();
+        eng.apply_player_action(
+            &mut s,
+            Seat::N,
+            PlayerAction::Play {
+                cards: vec!["♠6".into()],
+                wild_targets: None,
+            },
+            None,
+        )
+        .unwrap();
+        eng.apply_player_action(&mut s, Seat::W, PlayerAction::Pass, None)
             .unwrap();
-        eng
-            .apply_player_action(
-                &mut s,
-                Seat::N,
-                PlayerAction::Play {
-                    cards: vec!["♠6".into()],
-                    wild_targets: None,
-                },
-                None,
-            )
+        eng.apply_player_action(&mut s, Seat::S, PlayerAction::Pass, None)
             .unwrap();
-        eng
-            .apply_player_action(&mut s, Seat::W, PlayerAction::Pass, None)
-            .unwrap();
-        eng
-            .apply_player_action(&mut s, Seat::S, PlayerAction::Pass, None)
-            .unwrap();
-        eng
-            .apply_player_action(&mut s, Seat::E, PlayerAction::Pass, None)
-            .unwrap();
-        eng
-            .apply_player_action(
-                &mut s,
-                Seat::S,
-                PlayerAction::Play {
-                    cards: vec!["♠5".into()],
-                    wild_targets: None,
-                },
-                None,
-            )
-            .unwrap();
-        // S's last card empties both S and N -> SN team out -> scoring (no further passes).
+        eng.apply_player_action(
+            &mut s,
+            Seat::S,
+            PlayerAction::Play {
+                cards: vec!["♠5".into()],
+                wild_targets: None,
+            },
+            None,
+        )
+        .unwrap();
+        // S's last card empties both S and N -> SN team wins -> scoring (no further passes).
         assert_eq!(s.phase, GamePhase::Scoring);
-        assert_eq!(s.winner_team, Some(TeamId::Ew));
+        assert_eq!(s.winner_team, Some(TeamId::Sn));
     }
 }
-

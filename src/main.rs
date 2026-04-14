@@ -35,9 +35,7 @@ fn main() {
                     let rt = tokio::runtime::Runtime::new().expect("Tokio runtime");
                     rt.block_on(cli::server_restart(!no_auto_use))
                 }
-                other => cli::run_from_top(cli::Top::Server {
-                    cmd: Some(other),
-                }),
+                other => cli::run_from_top(cli::Top::Server { cmd: Some(other) }),
             }
         }
         other => cli::run_from_top(other),

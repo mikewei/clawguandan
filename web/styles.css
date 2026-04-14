@@ -403,6 +403,18 @@ button:disabled {
   gap: 4px;
 }
 
+.table-seat-center-rank {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 0.72rem;
+  font-weight: 500;
+  text-align: center;
+  letter-spacing: 0.01em;
+}
+
 .table-seat-cell {
   min-height: 52px;
   border-radius: 8px;
@@ -529,6 +541,16 @@ button:disabled {
 
 .modal-card h3 {
   margin: 0;
+}
+
+.modal-form-row {
+  display: grid;
+  gap: 6px;
+}
+
+.modal-form-label {
+  font-size: 0.86rem;
+  color: var(--muted);
 }
 
 .modal-actions {

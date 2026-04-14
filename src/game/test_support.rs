@@ -1,5 +1,5 @@
 use crate::domain::Seat;
-use crate::game::card::{HandLevel, Card};
+use crate::game::card::{Card, HandLevel};
 use crate::game::deck::Deck;
 use crate::game::types::{GamePhase, HandState, TableGameState, TributePair, TributeState};
 
@@ -70,4 +70,3 @@ impl TestFixtures {
         s
     }
 }
-

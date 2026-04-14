@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::domain::Seat;
-use crate::game::card::{is_wild, level_order_value, parse_card_symbol, RuleContext};
+use crate::game::card::{RuleContext, is_wild, level_order_value, parse_card_symbol};
 use crate::game::engine::PlayerAction;
 use crate::game::rules::beat_comparator::BeatComparator;
 use crate::game::rules::combination_parser::CombinationParser;
@@ -166,11 +166,7 @@ fn enumerate_playing(
         .hands
         .get(&actor)
         .ok_or_else(|| "missing actor hand".to_string())?;
-    let top = hand_state
-        .trick
-        .top_play
-        .as_ref()
-        .map(|p| &p.combination);
+    let top = hand_state.trick.top_play.as_ref().map(|p| &p.combination);
 
     // No cards: must pass (engine).
     if h.is_empty() {
@@ -252,9 +248,7 @@ fn enumerate_tribute(hand_state: &HandState, actor: Seat, ctx: RuleContext) -> V
     for s in h {
         if let Ok(c) = parse_card_symbol(s) {
             if !is_wild(c, ctx) && level_order_value(c, ctx) == best {
-                out.push(PlayerAction::Tribute {
-                    card: s.clone(),
-                });
+                out.push(PlayerAction::Tribute { card: s.clone() });
             }
         }
     }
@@ -306,22 +300,21 @@ pub fn current_actor_seat(state: &TableGameState) -> Option<Seat> {
         }
         GamePhase::Exchange => h.next_exchange_actor(),
         GamePhase::Playing => Some(state.turn_seat),
-        GamePhase::Scoring
-        | GamePhase::Dealing
-        | GamePhase::TableSetup
-        | GamePhase::Completed => None,
+        GamePhase::Scoring | GamePhase::Dealing | GamePhase::TableSetup | GamePhase::Completed => {
+            None
+        }
     }
 }
 
 /// All legal actions for `actor` when they are the current actor ([`current_actor_seat`]).
-pub fn enumerate_legal_actions(state: &TableGameState, actor: Seat) -> Result<Vec<PlayerAction>, String> {
+pub fn enumerate_legal_actions(
+    state: &TableGameState,
+    actor: Seat,
+) -> Result<Vec<PlayerAction>, String> {
     if current_actor_seat(state) != Some(actor) {
         return Err("not actor turn".into());
     }
-    let hand = state
-        .hand
-        .as_ref()
-        .ok_or_else(|| "no hand".to_string())?;
+    let hand = state.hand.as_ref().ok_or_else(|| "no hand".to_string())?;
     let ctx = RuleContext {
         hand_level: hand.hand_level,
     };
@@ -330,9 +323,8 @@ pub fn enumerate_legal_actions(state: &TableGameState, actor: Seat) -> Result<Ve
         GamePhase::Playing => enumerate_playing(hand, actor, ctx),
         GamePhase::Tribute => Ok(enumerate_tribute(hand, actor, ctx)),
         GamePhase::Exchange => enumerate_return(hand, actor),
-        GamePhase::Scoring
-        | GamePhase::Dealing
-        | GamePhase::TableSetup
-        | GamePhase::Completed => Ok(vec![]),
+        GamePhase::Scoring | GamePhase::Dealing | GamePhase::TableSetup | GamePhase::Completed => {
+            Ok(vec![])
+        }
     }
 }

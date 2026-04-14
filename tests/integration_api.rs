@@ -4,16 +4,14 @@
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use clawguandan::api::app_with_store;
-use clawguandan::game::card::{
-    level_order_value, parse_card_symbol, HandLevel, Suit, RuleContext,
-};
 use clawguandan::domain::Seat;
+use clawguandan::game::card::{HandLevel, RuleContext, Suit, level_order_value, parse_card_symbol};
 use clawguandan::game::rules::combination_parser::CombinationParser;
 use clawguandan::game::test_support::TestFixtures;
 use clawguandan::game::types::{GameConfig, GamePhase, HistoryActionKind, PlayState};
 use clawguandan::store::TableStore;
 use http_body_util::BodyExt;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tower::ServiceExt;
 
 async fn read_json(res: axum::response::Response) -> Value {
@@ -90,7 +88,20 @@ fn assert_cards_desc(cards: &[Value], hand_level: HandLevel) {
     }
 }
 
-async fn create_ready_table_with_store(app: axum::Router) -> (axum::Router, String, Vec<String>, u64) {
+async fn create_ready_table_with_store(
+    app: axum::Router,
+) -> (axum::Router, String, Vec<String>, u64) {
+    create_ready_table_with_store_and_rank(app, None).await
+}
+
+async fn create_ready_table_with_store_and_rank(
+    app: axum::Router,
+    rank: Option<&str>,
+) -> (axum::Router, String, Vec<String>, u64) {
+    let create_body = match rank {
+        Some(rank) => json!({ "rank": rank }).to_string(),
+        None => "{}".to_string(),
+    };
     let res = app
         .clone()
         .oneshot(
@@ -98,7 +109,7 @@ async fn create_ready_table_with_store(app: axum::Router) -> (axum::Router, Stri
                 .method("POST")
                 .uri("/api/v1/tables")
                 .header("content-type", "application/json")
-                .body(Body::from("{}"))
+                .body(Body::from(create_body))
                 .unwrap(),
         )
         .await
@@ -224,6 +235,85 @@ async fn embedded_js_asset_is_accessible() {
     assert!(
         content_type.contains("application/javascript"),
         "unexpected content-type: {content_type}"
+    );
+}
+
+#[tokio::test]
+async fn create_table_defaults_rank_to_two() {
+    let app = app_with_store(TableStore::new());
+    let create_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/tables")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let create_body = read_json(create_res).await;
+    let table_id = create_body["tableId"]
+        .as_str()
+        .expect("tableId")
+        .to_string();
+
+    let snap_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/tables/{}/snapshot", table_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(snap_res.status(), StatusCode::OK);
+    let snap = read_json(snap_res).await;
+    let teams = snap["teams"].as_array().expect("teams");
+    assert_eq!(teams[0]["level"], json!("2"));
+    assert_eq!(teams[1]["level"], json!("2"));
+}
+
+#[tokio::test]
+async fn create_table_rank_affects_first_hand_level() {
+    let store = TableStore::new();
+    let app = app_with_store(store);
+    let (app, table_id, pids, _) = create_ready_table_with_store_and_rank(app, Some("8")).await;
+    let snap = snapshot_player(&app, &table_id, &pids[0]).await;
+    let teams = snap["teams"].as_array().expect("teams");
+    assert_eq!(teams[0]["level"], json!("8"));
+    assert_eq!(teams[1]["level"], json!("8"));
+    assert_eq!(snap["hand"]["handLevel"], json!("8"));
+}
+
+#[tokio::test]
+async fn create_table_rejects_invalid_rank() {
+    let app = app_with_store(TableStore::new());
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/tables")
+                .header("content-type", "application/json")
+                .body(Body::from(json!({ "rank": "1" }).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let body = read_json(res).await;
+    assert_eq!(body["error"]["code"], json!("BAD_REQUEST"));
+    assert!(
+        body["error"]["message"]
+            .as_str()
+            .is_some_and(|m| m.contains("invalid rank")),
+        "unexpected error message: {:?}",
+        body
     );
 }
 
@@ -363,7 +453,12 @@ async fn nextstate_immediate_catch_up_when_behind() {
             &table_id,
             TestFixtures::table_game_tribute_two_pairs(),
             GameConfig {
-                rng_seed: store.get_snapshot(&table_id).await.unwrap().game_config.rng_seed,
+                rng_seed: store
+                    .get_snapshot(&table_id)
+                    .await
+                    .unwrap()
+                    .game_config
+                    .rng_seed,
             },
         )
         .await
@@ -391,8 +486,7 @@ async fn nextstate_immediate_catch_up_when_behind() {
                 .method("GET")
                 .uri(format!(
                     "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=50",
-                    table_id,
-                    seq
+                    table_id, seq
                 ))
                 .body(Body::empty())
                 .unwrap(),
@@ -443,7 +537,12 @@ async fn play_without_declared_mapping_auto_fills_and_logs_mapping() {
             &table_id,
             game,
             GameConfig {
-                rng_seed: store.get_snapshot(&table_id).await.unwrap().game_config.rng_seed,
+                rng_seed: store
+                    .get_snapshot(&table_id)
+                    .await
+                    .unwrap()
+                    .game_config
+                    .rng_seed,
             },
         )
         .await
@@ -528,7 +627,12 @@ async fn finishing_player_is_recorded_and_next_actor_skips_empty_seat() {
             &table_id,
             game,
             GameConfig {
-                rng_seed: store.get_snapshot(&table_id).await.unwrap().game_config.rng_seed,
+                rng_seed: store
+                    .get_snapshot(&table_id)
+                    .await
+                    .unwrap()
+                    .game_config
+                    .rng_seed,
             },
         )
         .await
@@ -604,7 +708,12 @@ async fn bomb_play_updates_table_narration() {
             &table_id,
             game,
             GameConfig {
-                rng_seed: store.get_snapshot(&table_id).await.unwrap().game_config.rng_seed,
+                rng_seed: store
+                    .get_snapshot(&table_id)
+                    .await
+                    .unwrap()
+                    .game_config
+                    .rng_seed,
             },
         )
         .await
@@ -633,9 +742,7 @@ async fn bomb_play_updates_table_narration() {
 
     let snap = snapshot_player(&app, &table_id, &pids[1]).await;
     assert!(
-        snap["narration"]
-            .as_str()
-            .is_some_and(|s| s.contains("炸")),
+        snap["narration"].as_str().is_some_and(|s| s.contains("炸")),
         "expected bomb narration, got {:?}",
         snap["narration"]
     );

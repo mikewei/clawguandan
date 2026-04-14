@@ -1,8 +1,8 @@
-use rand::seq::SliceRandom;
 use rand::SeedableRng;
+use rand::seq::SliceRandom;
 
-use crate::game::card::{Card, Rank, Suit};
 use crate::domain::Seat;
+use crate::game::card::{Card, Rank, Suit};
 
 /// Deterministic deck builder for tests and reproducible dealing.
 pub struct Deck {
@@ -69,9 +69,7 @@ impl Deck {
         let order = ccw_seat_order_from(first);
         for (i, card) in self.cards.iter().copied().enumerate() {
             let seat = order[i % 4];
-            out.get_mut(&seat)
-                .expect("seat exists")
-                .push(card);
+            out.get_mut(&seat).expect("seat exists").push(card);
         }
         out
     }
@@ -98,4 +96,3 @@ fn ccw_seat_order_from(first: Seat) -> [Seat; 4] {
     let s4 = next_ccw(s3);
     [s1, s2, s3, s4]
 }
-

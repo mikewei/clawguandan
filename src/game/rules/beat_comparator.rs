@@ -100,4 +100,3 @@ mod tests {
         assert!(!BeatComparator::can_beat(&high, &low));
     }
 }
-

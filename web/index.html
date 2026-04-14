@@ -56,6 +56,24 @@
         <h3 id="createTableModalTitle" data-i18n="createTableDialogTitle">Create new table</h3>
         <p class="muted" data-i18n="createTableDialogHint">Name is optional. Leave blank to use tableId.</p>
         <input id="createTableModalInput" type="text" maxlength="48" placeholder="Table name (optional)" data-i18n="phTableNameOptional" data-i18n-placeholder="true" />
+        <label class="modal-form-row" for="createTableModalRank">
+          <span class="modal-form-label" data-i18n="createTableRankLabel">Start rank</span>
+          <select id="createTableModalRank">
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+            <option value="8">8</option>
+            <option value="9">9</option>
+            <option value="10">10</option>
+            <option value="J">J</option>
+            <option value="Q">Q</option>
+            <option value="K">K</option>
+            <option value="A">A</option>
+          </select>
+        </label>
         <div class="modal-actions">
           <button id="createTableCancelBtn" type="button" data-i18n="cancel">Cancel</button>
           <button id="createTableConfirmBtn" type="button" class="accent-btn" data-i18n="confirm">Confirm</button>

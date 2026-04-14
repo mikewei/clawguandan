@@ -1,7 +1,7 @@
 //! Built-in strategies.
 
-use rand::seq::IndexedRandom;
 use rand::Rng;
+use rand::seq::IndexedRandom;
 
 use crate::game::engine::PlayerAction;
 use crate::strategy::traits::GameStrategy;
@@ -11,7 +11,11 @@ use crate::strategy::traits::GameStrategy;
 pub struct FirstLegal;
 
 impl GameStrategy for FirstLegal {
-    fn choose<R: Rng + ?Sized>(&mut self, _rng: &mut R, legal: &[PlayerAction]) -> Option<PlayerAction> {
+    fn choose<R: Rng + ?Sized>(
+        &mut self,
+        _rng: &mut R,
+        legal: &[PlayerAction],
+    ) -> Option<PlayerAction> {
         legal.first().cloned()
     }
 }
@@ -21,7 +25,11 @@ impl GameStrategy for FirstLegal {
 pub struct RandomLegal;
 
 impl GameStrategy for RandomLegal {
-    fn choose<R: Rng + ?Sized>(&mut self, rng: &mut R, legal: &[PlayerAction]) -> Option<PlayerAction> {
+    fn choose<R: Rng + ?Sized>(
+        &mut self,
+        rng: &mut R,
+        legal: &[PlayerAction],
+    ) -> Option<PlayerAction> {
         legal.choose(rng).cloned()
     }
 }

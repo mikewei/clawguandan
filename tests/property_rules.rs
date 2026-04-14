@@ -70,4 +70,3 @@ proptest! {
         assert!(!BeatComparator::can_beat(&cand, &top));
     }
 }
-

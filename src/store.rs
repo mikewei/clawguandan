@@ -1,25 +1,26 @@
 //! In-memory tables, per-table transition log, and long-poll signalling.
 
 use crate::domain::{
-    iso_timestamp, snapshot_replace_delta, Expect, NextStateBody, PlayerRecord, PlayerType,
-    Seat, StateTransition, TableRuntimeState, TableState, TableStatus,
+    Expect, NextStateBody, PlayerRecord, PlayerType, Seat, StateTransition, TableRuntimeState,
+    TableState, TableStatus, iso_timestamp, snapshot_replace_delta,
 };
 use crate::error::AppError;
 use crate::game::card::HandLevel;
 use crate::game::engine::{GameEngine, PlayerAction};
 use crate::game::rules::narration::{
     format_big_play, format_hand_end, format_rank_announce, format_tribute_action,
-    format_tribute_canceled,
-    is_big_play_combination,
+    format_tribute_canceled, is_big_play_combination,
 };
 use crate::game::rules::scoring::{Level, ScoringService, WinType};
-use crate::game::types::{GameConfig, GamePhase, HandCommitMeta, HandState, HistoryActionKind, TeamId};
+use crate::game::types::{
+    GameConfig, GamePhase, HandCommitMeta, HandState, HistoryActionKind, TeamId,
+};
 use crate::prompt::prompt_builder::{build_observer_prompt, build_player_prompt};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 #[derive(Clone)]
 pub struct TableStore {
@@ -57,10 +58,13 @@ impl Default for TableStore {
 }
 
 impl TableStore {
-
-    pub async fn create_table(&self, table_name: Option<String>) -> TableRuntimeState {
+    pub async fn create_table(
+        &self,
+        table_name: Option<String>,
+        start_level: Level,
+    ) -> TableRuntimeState {
         let id = format!("t_{}", uuid::Uuid::new_v4());
-        let state = TableRuntimeState::new(id.clone(), table_name);
+        let state = TableRuntimeState::new_with_level(id.clone(), table_name, start_level);
         let inner = Arc::new(Mutex::new(TableInner {
             state,
             log: Vec::new(),
@@ -101,12 +105,10 @@ impl TableStore {
             SeatOrAuto::Auto => Seat::ALL
                 .into_iter()
                 .find(|s| state.seats.get(s).and_then(|x| x.as_ref()).is_none())
-                .ok_or_else(|| {
-                    AppError::Conflict {
-                        message: "table is full".into(),
-                        code: "TABLE_FULL",
-                        current_seq: Some(state.seq),
-                    }
+                .ok_or_else(|| AppError::Conflict {
+                    message: "table is full".into(),
+                    code: "TABLE_FULL",
+                    current_seq: Some(state.seq),
                 }),
             SeatOrAuto::Fixed(seat) => {
                 if state.seats.get(&seat).and_then(|x| x.as_ref()).is_some() {
@@ -243,10 +245,14 @@ impl TableStore {
             inner.state.game_config = GameConfig {
                 rng_seed: TableRuntimeState::hash_table_id_seed(&inner.state.table_id),
             };
+            let first_hand_level = level_to_hand_level(match inner.state.current_declarer {
+                TeamId::Ew => inner.state.team_progress_ew.level,
+                TeamId::Sn => inner.state.team_progress_sn.level,
+            });
             let engine = GameEngine::new(inner.state.game_config.clone());
             let mut gs = engine.init_table(inner.state.table_id.clone());
             engine
-                .start_first_hand(&mut gs, Seat::E)
+                .start_first_hand(&mut gs, Seat::E, first_hand_level)
                 .expect("start_first_hand should not fail");
             inner.state.game = Some(gs);
             inner.state.sync_phase_from_game();
@@ -272,17 +278,18 @@ impl TableStore {
                         current_seq: Some(seq),
                     })?;
                 engine
-                    .start_next_hand_with_tribute(
-                        game,
-                        declarer,
-                        next_hand_level,
-                        &finishing_order,
-                    )
+                    .start_next_hand_with_tribute(game, declarer, next_hand_level, &finishing_order)
                     .map_err(|msg| map_engine_error(msg, seq))?;
                 game.hand
                     .as_ref()
                     .and_then(|h| h.tribute.as_ref())
-                    .and_then(|t| if t.canceled { Some(game.turn_seat) } else { None })
+                    .and_then(|t| {
+                        if t.canceled {
+                            Some(game.turn_seat)
+                        } else {
+                            None
+                        }
+                    })
             };
             inner.state.sync_phase_from_game();
             inner.state.waiting_next_hand_ready = false;
@@ -390,14 +397,20 @@ impl TableStore {
             .apply_player_action(game, seat, action, playing_commit)
             .map_err(|msg| map_engine_error(msg, seq))?;
         inner.state.sync_phase_from_game();
-        inner.state.narration = build_action_narration(&inner.state, prev_game.as_ref(), action_type);
+        inner.state.narration =
+            build_action_narration(&inner.state, prev_game.as_ref(), action_type);
 
         inner.state.seq += 1;
         let new_snapshot = inner.state.to_table_state();
         let new_seq = inner.state.seq;
         let expect_after = new_snapshot.expect.clone();
 
-        let logged_payload = normalized_event_payload(action_type, &event_payload, inner.state.game.as_ref(), new_seq);
+        let logged_payload = normalized_event_payload(
+            action_type,
+            &event_payload,
+            inner.state.game.as_ref(),
+            new_seq,
+        );
         let tr = build_transition(
             &prev_snapshot,
             &new_snapshot,
@@ -446,14 +459,11 @@ impl TableStore {
             current_seq: Some(seq),
         })?;
         let completed_order = {
-            let hand = game
-                .hand
-                .as_ref()
-                .ok_or_else(|| AppError::Conflict {
-                    message: "hand missing when entering scoring".into(),
-                    code: "INVALID_TABLE_STATUS",
-                    current_seq: Some(seq),
-                })?;
+            let hand = game.hand.as_ref().ok_or_else(|| AppError::Conflict {
+                message: "hand missing when entering scoring".into(),
+                code: "INVALID_TABLE_STATUS",
+                current_seq: Some(seq),
+            })?;
             complete_finishing_order(hand)
         };
 
@@ -587,10 +597,7 @@ impl TableStore {
                     let tr_seq = tr.seq;
                     let expect = entry.expect_after.clone();
                     let prompt = None;
-                    let lag = inner
-                        .state
-                        .seq
-                        .saturating_sub(tr_seq);
+                    let lag = inner.state.seq.saturating_sub(tr_seq);
                     return Ok(Some(NextStateBody {
                         transition: tr,
                         lag,
@@ -620,7 +627,9 @@ impl TableStore {
         timeout: Option<Duration>,
     ) -> Result<Option<NextStateBody>, AppError> {
         let body = self.next_state(table_id, since_seq, timeout).await?;
-        let Some(mut body) = body else { return Ok(None); };
+        let Some(mut body) = body else {
+            return Ok(None);
+        };
 
         if let Some(pid) = player_id {
             let snap = self.get_snapshot(table_id).await?;
@@ -673,9 +682,7 @@ fn build_action_narration(
         if action_type == "tribute" {
             let changed = pair.paid_card.is_some()
                 && prev_pair.and_then(|p| p.paid_card.as_deref()) != pair.paid_card.as_deref();
-            if changed
-                && let Some(card) = pair.paid_card.as_deref()
-            {
+            if changed && let Some(card) = pair.paid_card.as_deref() {
                 return format_tribute_action(
                     &player_name_for_seat(state, pair.payer),
                     card,
@@ -686,9 +693,7 @@ fn build_action_narration(
         } else if action_type == "return_card" {
             let changed = pair.return_card.is_some()
                 && prev_pair.and_then(|p| p.return_card.as_deref()) != pair.return_card.as_deref();
-            if changed
-                && let Some(card) = pair.return_card.as_deref()
-            {
+            if changed && let Some(card) = pair.return_card.as_deref() {
                 return format_tribute_action(
                     &player_name_for_seat(state, pair.receiver),
                     card,

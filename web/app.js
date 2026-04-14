@@ -9,6 +9,21 @@ const TRICK_RESET_PASS_COUNT = 3;
 const TRICK_LOOKBACK_LIMIT = 16;
 const SVG_CARDS_SPRITE_PATH = "/cards/svg-cards/svg-cards.svg";
 const SVG_CARD_VIEWBOX = "0 0 169.075 244.64";
+const CREATE_RANK_OPTIONS = new Set([
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "J",
+  "Q",
+  "K",
+  "A",
+]);
 
 const state = {
   session: loadSession(),
@@ -42,6 +57,7 @@ const el = {
   playerNameConfirmBtn: document.getElementById("playerNameConfirmBtn"),
   createTableModal: document.getElementById("createTableModal"),
   createTableModalInput: document.getElementById("createTableModalInput"),
+  createTableModalRank: document.getElementById("createTableModalRank"),
   createTableCancelBtn: document.getElementById("createTableCancelBtn"),
   createTableConfirmBtn: document.getElementById("createTableConfirmBtn"),
   sessionInfo: document.getElementById("sessionInfo"),
@@ -331,7 +347,7 @@ function closePlayerNameModal(result) {
   resolve(result);
 }
 
-function showCreateTableModal(defaultName = "") {
+function showCreateTableModal(defaultName = "", defaultRank = "2") {
   return new Promise((resolve) => {
     if (createTableModalResolver) {
       createTableModalResolver(null);
@@ -339,6 +355,7 @@ function showCreateTableModal(defaultName = "") {
     }
     createTableModalResolver = resolve;
     el.createTableModalInput.value = defaultName;
+    el.createTableModalRank.value = normalizeCreateRank(defaultRank);
     el.createTableModal.classList.remove("hidden");
     el.createTableModal.setAttribute("aria-hidden", "false");
     window.requestAnimationFrame(() => {
@@ -360,8 +377,17 @@ function closeCreateTableModal(result) {
 async function createTableFromModal() {
   const result = await showCreateTableModal("");
   if (result == null) return;
-  const tableName = String(result).trim();
-  await createTable(tableName);
+  const tableName = String(result.name || "").trim();
+  const rank = normalizeCreateRank(result.rank);
+  await createTable(tableName, rank);
+}
+
+function normalizeCreateRank(raw) {
+  const normalized = String(raw || "")
+    .trim()
+    .toUpperCase();
+  if (!normalized) return "2";
+  return CREATE_RANK_OPTIONS.has(normalized) ? normalized : "";
 }
 
 async function ensurePlayerName() {
@@ -478,12 +504,20 @@ async function refreshLobby() {
   renderTables();
 }
 
-async function createTable(name = "") {
+async function createTable(name = "", rank = "2") {
   setError("");
   const tableName = String(name || "").trim();
+  const rankToken = normalizeCreateRank(rank);
+  if (!rankToken) {
+    throw new Error(t("errRankInvalid"));
+  }
+  const body = { rank: rankToken };
+  if (tableName) {
+    body.name = tableName;
+  }
   const { json } = await apiFetch("/api/v1/tables", {
     method: "POST",
-    body: JSON.stringify(tableName ? { name: tableName } : {}),
+    body: JSON.stringify(body),
   });
   await refreshLobby();
   return json.tableId || "";
@@ -644,13 +678,28 @@ function resolveTributeContext(actionType, actorPlayerId, actionCard, tableAfter
   return { targetSeat };
 }
 
-function shouldShowTributeGhost(handCards) {
+function deriveTributeGhostFromPlan(table, mySeat) {
+  if (!table || !mySeat) return null;
+  const pairs = table?.hand?.tributePlan?.pairs || [];
+  const matched = pairs.find((p) => {
+    const receiver = String(p?.receiver || "").trim();
+    const paidCard = String(p?.paidCard || "").trim();
+    const returnCard = String(p?.returnCard || "").trim();
+    return receiver === mySeat && Boolean(paidCard) && !returnCard;
+  });
+  const card = String(matched?.paidCard || "").trim();
+  if (!card) return null;
+  return { card };
+}
+
+function shouldShowTributeGhost(table, mySeat) {
+  const legalActions = state.expect?.legalActions || [];
+  const fromPlan = deriveTributeGhostFromPlan(table, mySeat);
+  if (fromPlan) return fromPlan;
   const ghost = state.pendingTributeGhost;
   if (!ghost || !ghost.card) return null;
-  const legalActions = state.expect?.legalActions || [];
   const inReturnPhase = state.expect?.kind === "exchange" || legalActions.includes("return_card");
   if (!inReturnPhase) return null;
-  if (Array.isArray(handCards) && handCards.includes(ghost.card)) return null;
   return ghost;
 }
 
@@ -1435,6 +1484,12 @@ function renderTables() {
 
     const seatMap = document.createElement("div");
     seatMap.className = "table-seat-map";
+    const tableTeams = Array.isArray(tableState.teams) ? tableState.teams : [];
+    const initialRank =
+      String(tableTeams[0]?.level || "").trim() ||
+      String(tableTeams[1]?.level || "").trim() ||
+      "2";
+    const shouldShowInitialRank = initialRank && initialRank !== "2";
     const layout = [
       "void",
       "N",
@@ -1447,9 +1502,13 @@ function renderTables() {
       "void",
     ];
     const seats = item.state?.seats || {};
-    layout.forEach((pos) => {
+    layout.forEach((pos, index) => {
       const cell = document.createElement("div");
       if (pos === "void") {
+        if (index === 4 && shouldShowInitialRank) {
+          cell.className = "table-seat-center-rank";
+          cell.textContent = tf("tableInitialRank", { rank: initialRank });
+        }
         seatMap.appendChild(cell);
         return;
       }
@@ -1647,7 +1706,7 @@ function render() {
   }
 
   const cards = state.privateView?.handCards || [];
-  const tributeGhost = shouldShowTributeGhost(cards);
+  const tributeGhost = shouldShowTributeGhost(table, mySeat);
   const nextPrivateHandContentSig = privateHandContentSignature(cards, tributeGhost?.card || "");
   if (nextPrivateHandContentSig !== renderCache.privateHandContentSig) {
     rebuildPrivateHand(cards, tributeGhost);
@@ -1740,7 +1799,10 @@ async function init() {
   });
 
   el.createTableConfirmBtn.addEventListener("click", () => {
-    closeCreateTableModal(el.createTableModalInput.value);
+    closeCreateTableModal({
+      name: el.createTableModalInput.value,
+      rank: el.createTableModalRank.value,
+    });
   });
   el.createTableCancelBtn.addEventListener("click", () => {
     closeCreateTableModal(null);
@@ -1753,7 +1815,10 @@ async function init() {
   el.createTableModalInput.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter") {
       ev.preventDefault();
-      closeCreateTableModal(el.createTableModalInput.value);
+      closeCreateTableModal({
+        name: el.createTableModalInput.value,
+        rank: el.createTableModalRank.value,
+      });
       return;
     }
     if (ev.key === "Escape") {
