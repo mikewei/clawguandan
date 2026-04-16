@@ -9,6 +9,7 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::time::Instant;
 
 /// Seat position in turn order.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -140,9 +141,37 @@ pub struct SeatPublic {
     pub player_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub player_type: Option<PlayerType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presence: Option<PlayerPresence>,
     pub ready: bool,
     /// Remaining hand cards; null in MVP lobby.
     pub remaining_count: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PlayerPresence {
+    Active,
+    Away,
+}
+
+impl Serialize for PlayerPresence {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(match self {
+            PlayerPresence::Active => "active",
+            PlayerPresence::Away => "away",
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for PlayerPresence {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        match s.as_str() {
+            "active" => Ok(PlayerPresence::Active),
+            "away" => Ok(PlayerPresence::Away),
+            _ => Err(SerdeDeError::custom("invalid player presence")),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -252,7 +281,9 @@ pub struct PlayerRecord {
     pub player_id: String,
     pub player_name: String,
     pub player_type: PlayerType,
+    pub presence: PlayerPresence,
     pub ready: bool,
+    pub last_activity_at: Instant,
 }
 
 #[derive(Clone, Debug)]
@@ -598,6 +629,7 @@ impl TableRuntimeState {
                         player_id: Some(p.player_id.clone()),
                         player_name: Some(p.player_name.clone()),
                         player_type: Some(p.player_type.clone()),
+                        presence: Some(p.presence.clone()),
                         ready: p.ready,
                         remaining_count,
                     },
@@ -605,6 +637,7 @@ impl TableRuntimeState {
                         player_id: None,
                         player_name: None,
                         player_type: None,
+                        presence: None,
                         ready: false,
                         remaining_count: None,
                     },

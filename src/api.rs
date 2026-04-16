@@ -352,6 +352,10 @@ async fn suggest(
     Path(table_id): Path<String>,
     Query(q): Query<SuggestQuery>,
 ) -> Result<Json<SuggestResponse>, AppError> {
+    state
+        .store
+        .touch_player_activity(&table_id, &q.player_id)
+        .await?;
     let snap = state.store.get_snapshot(&table_id).await?;
     if q.seq != snap.seq {
         return Err(AppError::Conflict {
@@ -495,6 +499,9 @@ async fn snapshot(
     Path(table_id): Path<String>,
     Query(q): Query<SnapshotQuery>,
 ) -> Result<Json<SnapshotResponse>, AppError> {
+    if let Some(pid) = q.player_id.as_deref() {
+        state.store.touch_player_activity(&table_id, pid).await?;
+    }
     let snap = state.store.get_snapshot(&table_id).await?;
     if let Some(at_seq) = q.at_seq
         && at_seq != snap.seq

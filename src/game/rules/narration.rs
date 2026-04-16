@@ -121,6 +121,21 @@ pub fn format_hand_end(
     }
 }
 
+pub fn format_game_end_by_leave(leaving_names: &[String]) -> String {
+    let names = if leaving_names.is_empty() {
+        "玩家".to_string()
+    } else {
+        leaving_names.join("、")
+    };
+    bilingual(
+        format!("{} 超时离开，游戏结束，本局不计分。", names),
+        format!(
+            "{} timed out and left. Game ended with no score settlement.",
+            names
+        ),
+    )
+}
+
 fn bilingual(zh: String, en: String) -> String {
     json!({ "zh": zh, "en": en }).to_string()
 }

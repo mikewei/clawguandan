@@ -473,6 +473,10 @@ button:disabled {
   color: #62e3aa;
 }
 
+.seat-status-away {
+  color: #ff9c9c;
+}
+
 .seat-ready-dot {
   width: 8px;
   height: 8px;
@@ -484,6 +488,10 @@ button:disabled {
 
 .seat-ready-dot.ready {
   background: var(--accent-2);
+}
+
+.seat-ready-dot.away {
+  background: #ff7a7a;
 }
 
 .table-card-actions {
@@ -681,6 +689,16 @@ button:disabled {
 .trick-feed-item.is-self .trick-feed-bubble {
   border-color: rgba(155, 232, 193, 0.65);
   background: var(--self-light-green-bg);
+}
+
+.trick-feed-item-historical .card-face {
+  filter: grayscale(0.88) saturate(0.6);
+  opacity: 0.58;
+}
+
+.trick-feed-item-historical .trick-feed-bubble,
+.trick-feed-item-historical .trick-feed-pass {
+  opacity: 0.58;
 }
 
 .trick-feed-meta {
@@ -918,6 +936,12 @@ button:disabled {
   color: #ffd0d0;
 }
 
+.seat-tag-away {
+  border-color: rgba(255, 122, 122, 0.75);
+  background: rgba(255, 122, 122, 0.18);
+  color: #ffd0d0;
+}
+
 .seat-finish-rank {
   width: fit-content;
   font-size: 0.74rem;
@@ -1011,6 +1035,15 @@ button:disabled {
 .trick-group-top .card-face {
   outline: 2px solid rgba(255, 209, 102, 0.75);
   transform: translateY(-2px);
+}
+
+.trick-group-historical .card-face {
+  filter: grayscale(0.88) saturate(0.6);
+  opacity: 0.58;
+}
+
+.trick-group-historical .trick-pass-overlay {
+  opacity: 0.55;
 }
 
 .trick-layer .card-face-compact {

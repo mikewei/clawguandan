@@ -1,14 +1,15 @@
 //! In-memory tables, per-table transition log, and long-poll signalling.
 
 use crate::domain::{
-    Expect, NextStateBody, PlayerRecord, PlayerType, Seat, StateTransition, TableRuntimeState,
-    TableState, TableStatus, iso_timestamp, snapshot_replace_delta,
+    Expect, NextStateBody, PlayerPresence, PlayerRecord, PlayerType, Seat, StateTransition,
+    TableRuntimeState, TableState, TableStatus, iso_timestamp, snapshot_replace_delta,
 };
 use crate::error::AppError;
 use crate::game::card::HandLevel;
 use crate::game::engine::{GameEngine, PlayerAction};
 use crate::game::rules::narration::{
-    format_big_play, format_hand_end, format_rank_announce, format_tribute_action,
+    format_big_play, format_game_end_by_leave, format_hand_end, format_rank_announce,
+    format_tribute_action,
     format_tribute_canceled, is_big_play_combination,
 };
 use crate::game::rules::scoring::{Level, ScoringService, WinType};
@@ -21,6 +22,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Notify};
 use tokio::time::{Duration, sleep};
+
+const PLAYER_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Clone)]
 pub struct TableStore {
@@ -81,7 +84,8 @@ impl TableStore {
         let t = g
             .get(table_id)
             .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))?;
-        let inner = t.lock().await;
+        let mut inner = t.lock().await;
+        Self::expire_inactive_players_locked(&mut inner)?;
         Ok(inner.state.clone())
     }
 
@@ -93,7 +97,8 @@ impl TableStore {
         };
         let mut out = Vec::with_capacity(arcs.len());
         for arc in arcs {
-            let inner = arc.lock().await;
+            let mut inner = arc.lock().await;
+            let _ = Self::expire_inactive_players_locked(&mut inner);
             out.push(inner.state.clone());
         }
         out.sort_by(|a, b| a.table_id.cmp(&b.table_id));
@@ -158,7 +163,9 @@ impl TableStore {
                 player_id: pid.clone(),
                 player_name,
                 player_type: pt.clone(),
+                presence: PlayerPresence::Active,
                 ready: false,
+                last_activity_at: std::time::Instant::now(),
             }),
         );
         inner.state.seq += 1;
@@ -201,6 +208,8 @@ impl TableStore {
         };
 
         let mut inner = arc.lock().await;
+        Self::touch_player_activity_locked(&mut inner, player_id);
+        Self::expire_inactive_players_locked(&mut inner)?;
 
         let mut found = None;
         for (seat, slot) in &inner.state.seats {
@@ -346,6 +355,8 @@ impl TableStore {
         action_type: &'static str,
         event_payload: serde_json::Value,
     ) -> Result<u64, AppError> {
+        Self::touch_player_activity_locked(inner, player_id);
+        Self::expire_inactive_players_locked(inner)?;
         if client_seq != inner.state.seq {
             return Err(AppError::Conflict {
                 message: format!(
@@ -581,7 +592,8 @@ impl TableStore {
 
         loop {
             let notify = {
-                let inner = arc.lock().await;
+                let mut inner = arc.lock().await;
+                Self::expire_inactive_players_locked(&mut inner)?;
                 if since_seq > inner.state.seq {
                     return Err(AppError::BadRequest(format!(
                         "sinceSeq {} is ahead of currentSeq {}",
@@ -626,8 +638,14 @@ impl TableStore {
         player_id: Option<&str>,
         timeout: Option<Duration>,
     ) -> Result<Option<NextStateBody>, AppError> {
+        if let Some(pid) = player_id {
+            self.touch_player_activity(table_id, pid).await?;
+        }
         let body = self.next_state(table_id, since_seq, timeout).await?;
         let Some(mut body) = body else {
+            if let Some(pid) = player_id {
+                self.touch_player_activity(table_id, pid).await?;
+            }
             return Ok(None);
         };
 
@@ -647,7 +665,101 @@ impl TableStore {
             body.prompt = Some(build_observer_prompt(&body.expect));
         }
 
+        if let Some(pid) = player_id {
+            self.touch_player_activity(table_id, pid).await?;
+        }
         Ok(Some(body))
+    }
+
+    pub async fn touch_player_activity(&self, table_id: &str, player_id: &str) -> Result<(), AppError> {
+        let arc = {
+            let g = self.tables.lock().await;
+            g.get(table_id)
+                .cloned()
+                .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))?
+        };
+        let mut inner = arc.lock().await;
+        Self::touch_player_activity_locked(&mut inner, player_id);
+        Self::expire_inactive_players_locked(&mut inner)?;
+        Ok(())
+    }
+
+    fn touch_player_activity_locked(inner: &mut TableInner, player_id: &str) -> bool {
+        let now = std::time::Instant::now();
+        for slot in inner.state.seats.values_mut() {
+            if let Some(player) = slot.as_mut()
+                && player.player_id == player_id
+            {
+                player.last_activity_at = now;
+                return true;
+            }
+        }
+        false
+    }
+
+    fn expire_inactive_players_locked(inner: &mut TableInner) -> Result<(), AppError> {
+        if matches!(inner.state.status, TableStatus::Finished) {
+            return Ok(());
+        }
+        let now = std::time::Instant::now();
+        let mut away_player_ids = Vec::new();
+        let mut away_player_names = Vec::new();
+        for slot in inner.state.seats.values_mut() {
+            if let Some(player) = slot.as_mut() {
+                if player.presence == PlayerPresence::Away {
+                    continue;
+                }
+                if now.duration_since(player.last_activity_at) > PLAYER_INACTIVITY_TIMEOUT {
+                    player.presence = PlayerPresence::Away;
+                    away_player_ids.push(player.player_id.clone());
+                    away_player_names.push(player.player_name.clone());
+                }
+            }
+        }
+        if away_player_ids.is_empty() {
+            return Ok(());
+        }
+
+        let prev_snapshot = inner.state.to_table_state();
+        let prev_seq = inner.state.seq;
+        let should_finish_game = matches!(inner.state.status, TableStatus::InGame);
+        if should_finish_game {
+            inner.state.status = TableStatus::Finished;
+            inner.state.waiting_next_hand_ready = false;
+            inner.state.narration = format_game_end_by_leave(&away_player_names);
+            if let Some(g) = inner.state.game.as_mut() {
+                g.phase = GamePhase::Completed;
+            }
+            inner.state.sync_phase_from_game();
+        }
+
+        inner.state.seq += 1;
+        let new_snapshot = inner.state.to_table_state();
+        let new_seq = inner.state.seq;
+        let expect_after = new_snapshot.expect.clone();
+        let transition_type = if should_finish_game {
+            "PLAYER_AWAY_GAME_ENDED"
+        } else {
+            "PLAYER_MARKED_AWAY"
+        };
+        let tr = build_transition(
+            &prev_snapshot,
+            &new_snapshot,
+            prev_seq,
+            new_seq,
+            transition_type,
+            Some(json!({
+                "actionType": "player_timeout",
+                "awayPlayerIds": away_player_ids,
+                "gameEnded": should_finish_game,
+            })),
+        );
+        inner.log.push(LogEntry {
+            transition: tr,
+            expect_after,
+        });
+        inner.notify.notify_waiters();
+        Ok(())
     }
 }
 
@@ -978,5 +1090,35 @@ impl TableStore {
         inner.state.waiting_next_hand_ready = false;
         inner.state.narration.clear();
         Ok(())
+    }
+
+    /// Rewind one seated player's activity timestamp by `ago`.
+    #[doc(hidden)]
+    pub async fn test_rewind_player_activity(
+        &self,
+        table_id: &str,
+        player_id: &str,
+        ago: Duration,
+    ) -> Result<(), AppError> {
+        let arc = {
+            let g = self.tables.lock().await;
+            g.get(table_id)
+                .cloned()
+                .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))?
+        };
+        let mut inner = arc.lock().await;
+        let when = std::time::Instant::now() - ago;
+        for slot in inner.state.seats.values_mut() {
+            if let Some(player) = slot.as_mut()
+                && player.player_id == player_id
+            {
+                player.last_activity_at = when;
+                return Ok(());
+            }
+        }
+        Err(AppError::NotFound(format!(
+            "unknown player_id {} at table {}",
+            player_id, table_id
+        )))
     }
 }

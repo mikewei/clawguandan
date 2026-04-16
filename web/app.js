@@ -891,8 +891,8 @@ function historyTailSignature(history, limit) {
   }).join(";");
 }
 
-function latestTrickSignature(latestTrickBySeat, topPlaySeat, mySeat) {
-  const parts = [`top:${topPlaySeat || ""}`, `my:${mySeat || ""}`];
+function latestTrickSignature(latestTrickBySeat, topPlaySeat, mySeat, actorSeat) {
+  const parts = [`top:${topPlaySeat || ""}`, `my:${mySeat || ""}`, `actor:${actorSeat || ""}`];
   SEATS.forEach((seat) => {
     const entry = latestTrickBySeat.get(seat) || null;
     const cards = Array.isArray(entry?.cards) ? entry.cards.join(",") : "";
@@ -901,7 +901,7 @@ function latestTrickSignature(latestTrickBySeat, topPlaySeat, mySeat) {
   return parts.join("|");
 }
 
-function trickFeedSignature(table, history, narration, mySeat) {
+function trickFeedSignature(table, history, narration, mySeat, isLeadTurn) {
   const trickHistory = sliceCurrentTrickHistory(history);
   const seatSig = SEATS.map((seat) => {
     const info = table?.seats?.[seat] || null;
@@ -911,7 +911,7 @@ function trickFeedSignature(table, history, narration, mySeat) {
     const cards = Array.isArray(entry?.cards) ? entry.cards.join(",") : "";
     return `${entry?.seq || ""}:${entry?.seat || ""}:${entry?.actionType || ""}:${cards}`;
   }).join(";");
-  return `${seatSig}::${mySeat || ""}::${trickSig}::${narration || ""}`;
+  return `${seatSig}::${mySeat || ""}::${isLeadTurn ? "lead" : "follow"}::${trickSig}::${narration || ""}`;
 }
 
 function renderSceneVisibility() {
@@ -1063,7 +1063,7 @@ function buildTrickFeedPlayerCard(table, seat, mySeat) {
   return card;
 }
 
-function renderTrickFeed(table, history, narration, mySeat) {
+function renderTrickFeed(table, history, narration, mySeat, isLeadTurn) {
   el.trickFeed.innerHTML = "";
   const trickHistory = sliceCurrentTrickHistory(history);
   if (!trickHistory.length) {
@@ -1080,6 +1080,9 @@ function renderTrickFeed(table, history, narration, mySeat) {
       line.className = `trick-feed-item ${friendly ? "is-friendly" : "is-opponent"}`;
       if (isSelf) {
         line.classList.add("is-self");
+      }
+      if (isLeadTurn) {
+        line.classList.add("trick-feed-item-historical");
       }
 
       const bubble = document.createElement("div");
@@ -1263,8 +1266,9 @@ function buildSeatCard(table, seat, info, actorPlayerId, mySeat, finishRankBySea
   const title = document.createElement("div");
   title.className = "seat-title";
   title.textContent = playerNameText(info);
+  const isAway = String(info?.presence || "").toLowerCase() === "away";
   const dot = document.createElement("span");
-  dot.className = `seat-ready-dot ${info.ready ? "ready" : ""}`;
+  dot.className = `seat-ready-dot ${isAway ? "away" : info.ready ? "ready" : ""}`;
   title.appendChild(dot);
   item.appendChild(title);
 
@@ -1280,6 +1284,12 @@ function buildSeatCard(table, seat, info, actorPlayerId, mySeat, finishRankBySea
   item.appendChild(meta);
 
   const tags = buildSeatTags(table, seat, info);
+  if (isAway) {
+    tags.push({
+      text: t("stateAway"),
+      variant: "seat-tag-away",
+    });
+  }
   if (tags.length) {
     const tagsRow = document.createElement("div");
     tagsRow.className = "seat-tags";
@@ -1318,7 +1328,7 @@ function renderPortraitSeatOverview(table, mySeat, finishRankBySeat) {
   }
 }
 
-function renderTrickLayer(mySeat, latestTrickBySeat, topPlaySeat) {
+function renderTrickLayer(mySeat, latestTrickBySeat, topPlaySeat, isLeadTurn, actorSeat) {
   el.trickBySeat.innerHTML = "";
   for (const seat of SEATS) {
     const relativeSeat = toRelativeSeat(seat, mySeat);
@@ -1330,6 +1340,13 @@ function renderTrickLayer(mySeat, latestTrickBySeat, topPlaySeat) {
     const seatAction = latestTrickBySeat.get(seat) || null;
     const cards = seatAction?.actionType === "pass" ? [] : (seatAction?.cards || []);
     const isPass = seatAction?.actionType === "pass";
+    const isActorResidual = Boolean(actorSeat) && seat === actorSeat && (isPass || cards.length > 0);
+    if (isLeadTurn && (isPass || cards.length > 0)) {
+      group.classList.add("trick-group-historical");
+    }
+    if (isActorResidual) {
+      group.classList.add("trick-group-historical");
+    }
     if (isPass) {
       group.classList.add("trick-group-pass");
       const passOverlay = document.createElement("div");
@@ -1534,9 +1551,12 @@ function renderTables() {
         name.className = "seat-name";
         name.textContent = player.playerName || "-";
         const status = document.createElement("div");
+        const isAway = String(player?.presence || "").toLowerCase() === "away";
         const ready = Boolean(player.ready);
-        status.className = `seat-status ${ready ? "seat-status-ready" : "seat-status-waiting"}`;
-        status.textContent = ready ? t("stateReady") : t("stateWaiting");
+        status.className = `seat-status ${
+          isAway ? "seat-status-away" : ready ? "seat-status-ready" : "seat-status-waiting"
+        }`;
+        status.textContent = isAway ? t("stateAway") : ready ? t("stateReady") : t("stateWaiting");
         cell.appendChild(seatLabel);
         cell.appendChild(name);
         cell.appendChild(status);
@@ -1673,6 +1693,7 @@ function render() {
   const topPlay = table.hand?.topPlay;
   const topPlayCards = topPlay?.cards || [];
   const hasTopPlayCards = Array.isArray(topPlayCards) && topPlayCards.length > 0;
+  const isLeadTurn = !topPlay;
   const nextTopPlaySig = topPlaySignature(topPlay);
   if (nextTopPlaySig !== renderCache.topPlaySig) {
     renderTopPlay(topPlay);
@@ -1680,16 +1701,19 @@ function render() {
   }
 
   const history = table.hand?.history || [];
-  const latestTrick = buildLatestTrickBySeat(history);
-  const nextTrickLayerSig = latestTrickSignature(latestTrick, topPlay?.seat || null, mySeat);
+  // Main table trick layer should only reflect current trick actions.
+  // This clears stale cards from other seats right after a new lead play.
+  const latestTrick = buildLatestTrickBySeat(sliceCurrentTrickHistory(history));
+  const actorSeat = getSeatInfoByPlayerId(table, state.expect?.actorPlayerId || "")?.seat || null;
+  const nextTrickLayerSig = latestTrickSignature(latestTrick, topPlay?.seat || null, mySeat, actorSeat);
   if (nextTrickLayerSig !== renderCache.trickLayerSig) {
-    renderTrickLayer(mySeat, latestTrick, topPlay?.seat || null);
+    renderTrickLayer(mySeat, latestTrick, topPlay?.seat || null, isLeadTurn, actorSeat);
     renderCache.trickLayerSig = nextTrickLayerSig;
   }
   if (feedMode) {
-    const nextTrickFeedSig = trickFeedSignature(table, history, narration, mySeat);
+    const nextTrickFeedSig = trickFeedSignature(table, history, narration, mySeat, isLeadTurn);
     if (nextTrickFeedSig !== renderCache.trickFeedSig) {
-      renderTrickFeed(table, history, narration, mySeat);
+      renderTrickFeed(table, history, narration, mySeat, isLeadTurn);
       renderCache.trickFeedSig = nextTrickFeedSig;
     }
   } else {

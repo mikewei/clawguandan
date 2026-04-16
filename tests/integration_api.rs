@@ -12,6 +12,7 @@ use clawguandan::game::types::{GameConfig, GamePhase, HistoryActionKind, PlaySta
 use clawguandan::store::TableStore;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
+use std::time::Duration;
 use tower::ServiceExt;
 
 async fn read_json(res: axum::response::Response) -> Value {
@@ -744,6 +745,61 @@ async fn bomb_play_updates_table_narration() {
     assert!(
         snap["narration"].as_str().is_some_and(|s| s.contains("炸")),
         "expected bomb narration, got {:?}",
+        snap["narration"]
+    );
+}
+
+#[tokio::test]
+async fn inactive_player_marks_away_and_ends_game_without_scoring() {
+    let store = TableStore::new();
+    let app = app_with_store(store.clone());
+    let (app, table_id, pids, seq) = create_ready_table_with_store(app).await;
+
+    store
+        .test_rewind_player_activity(&table_id, &pids[1], Duration::from_secs(31 * 60))
+        .await
+        .unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=50&playerId={}",
+                    table_id, seq, pids[0]
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = read_json(res).await;
+    assert_eq!(body["type"], "PLAYER_AWAY_GAME_ENDED");
+    assert_eq!(body["expect"]["kind"], "game_over");
+    assert_eq!(
+        body["delta"]["event"]["trigger"]["actionType"],
+        json!("player_timeout")
+    );
+    let away_ids = body["delta"]["event"]["trigger"]["awayPlayerIds"]
+        .as_array()
+        .expect("awayPlayerIds");
+    assert!(
+        away_ids.iter().any(|v| v.as_str() == Some(pids[1].as_str())),
+        "expected awayPlayerIds to include timed-out player"
+    );
+
+    let snap = snapshot_player(&app, &table_id, &pids[0]).await;
+    assert_eq!(snap["status"], json!("finished"));
+    assert_eq!(snap["phase"], json!("completed"));
+    assert_eq!(snap["expect"]["kind"], json!("game_over"));
+    assert_eq!(snap["seats"]["S"]["presence"], json!("away"));
+    assert!(
+        snap["narration"]
+            .as_str()
+            .is_some_and(|s| s.contains("不计分")),
+        "expected no-scoring leave narration, got {:?}",
         snap["narration"]
     );
 }
