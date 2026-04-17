@@ -142,6 +142,8 @@ pub struct SeatPublic {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub player_type: Option<PlayerType>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub player_model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub presence: Option<PlayerPresence>,
     pub ready: bool,
     /// Remaining hand cards; null in MVP lobby.
@@ -188,8 +190,8 @@ pub struct TeamPublic {
 #[serde(rename_all = "camelCase")]
 pub struct Expect {
     pub kind: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub actor_player_id: Option<String>,
+    #[serde(default)]
+    pub actor_player_ids: Vec<String>,
     #[serde(default)]
     pub legal_actions: Vec<String>,
     pub deadline_at: Option<String>,
@@ -281,6 +283,7 @@ pub struct PlayerRecord {
     pub player_id: String,
     pub player_name: String,
     pub player_type: PlayerType,
+    pub player_model: Option<String>,
     pub presence: PlayerPresence,
     pub ready: bool,
     pub last_activity_at: Instant,
@@ -311,6 +314,15 @@ pub struct TableRuntimeState {
 }
 
 impl TableRuntimeState {
+    fn unready_player_ids(&self) -> Vec<String> {
+        Seat::ALL
+            .into_iter()
+            .filter_map(|seat| self.seats.get(&seat).and_then(|slot| slot.as_ref()))
+            .filter(|p| !p.ready)
+            .map(|p| p.player_id.clone())
+            .collect()
+    }
+
     pub fn new(table_id: String, table_name: Option<String>) -> Self {
         Self::new_with_level(table_id, table_name, Level::Two)
     }
@@ -523,37 +535,49 @@ impl TableRuntimeState {
                         h.next_tribute_actor()
                     }
                 });
+                let actor_player_ids = actor
+                    .and_then(|s| self.player_id_for_seat(s))
+                    .into_iter()
+                    .collect::<Vec<_>>();
                 Expect {
                     kind: "tribute".into(),
-                    actor_player_id: actor.and_then(|s| self.player_id_for_seat(s)),
+                    actor_player_ids: actor_player_ids.clone(),
                     legal_actions: vec!["tribute".into()],
                     deadline_at: None,
                 }
             }
             GamePhase::Exchange => {
                 let actor = g.hand.as_ref().and_then(|h| h.next_exchange_actor());
+                let actor_player_ids = actor
+                    .and_then(|s| self.player_id_for_seat(s))
+                    .into_iter()
+                    .collect::<Vec<_>>();
                 Expect {
                     kind: "exchange".into(),
-                    actor_player_id: actor.and_then(|s| self.player_id_for_seat(s)),
+                    actor_player_ids: actor_player_ids.clone(),
                     legal_actions: vec!["return_card".into()],
                     deadline_at: None,
                 }
             }
-            GamePhase::Playing => Expect {
-                kind: "play".into(),
-                actor_player_id: self.player_id_for_seat(g.turn_seat),
-                legal_actions: vec!["play".into(), "pass".into()],
-                deadline_at: None,
-            },
+            GamePhase::Playing => {
+                let actor_player_ids: Vec<String> =
+                    self.player_id_for_seat(g.turn_seat).into_iter().collect();
+                Expect {
+                    kind: "play".into(),
+                    actor_player_ids: actor_player_ids.clone(),
+                    legal_actions: vec!["play".into(), "pass".into()],
+                    deadline_at: None,
+                }
+            }
             GamePhase::Scoring | GamePhase::Dealing | GamePhase::TableSetup => Expect {
                 kind: "wait".into(),
-                actor_player_id: None,
+                actor_player_ids: vec![],
                 legal_actions: vec![],
                 deadline_at: None,
             },
             GamePhase::Completed => Expect {
                 kind: "game_over".into(),
-                actor_player_id: None,
+                actor_player_ids: vec![],
                 legal_actions: vec![],
                 deadline_at: None,
             },
@@ -577,7 +601,7 @@ impl TableRuntimeState {
             .unwrap_or_default();
         sort_private_hand_cards_desc(&mut hand_cards, hand_level);
         let expect = self.compute_expect();
-        let mine = expect.actor_player_id.as_deref() == Some(player_id);
+        let mine = expect.actor_player_ids.iter().any(|pid| pid == player_id);
         let (can_play, can_pass) = if expect.kind == "play" {
             (mine, mine)
         } else {
@@ -629,6 +653,7 @@ impl TableRuntimeState {
                         player_id: Some(p.player_id.clone()),
                         player_name: Some(p.player_name.clone()),
                         player_type: Some(p.player_type.clone()),
+                        player_model: p.player_model.clone(),
                         presence: Some(p.presence.clone()),
                         ready: p.ready,
                         remaining_count,
@@ -637,6 +662,7 @@ impl TableRuntimeState {
                         player_id: None,
                         player_name: None,
                         player_type: None,
+                        player_model: None,
                         presence: None,
                         ready: false,
                         remaining_count: None,
@@ -696,7 +722,7 @@ impl TableRuntimeState {
         if matches!(self.status, TableStatus::Finished) {
             return Expect {
                 kind: "game_over".into(),
-                actor_player_id: None,
+                actor_player_ids: vec![],
                 legal_actions: vec![],
                 deadline_at: None,
             };
@@ -704,15 +730,16 @@ impl TableRuntimeState {
         if occupied < 4 {
             return Expect {
                 kind: "join".into(),
-                actor_player_id: None,
+                actor_player_ids: vec![],
                 legal_actions: vec![],
                 deadline_at: None,
             };
         }
         if !self.all_ready() {
+            let actor_player_ids = self.unready_player_ids();
             return Expect {
                 kind: "ready".into(),
-                actor_player_id: None,
+                actor_player_ids: actor_player_ids.clone(),
                 legal_actions: vec!["ready".into()],
                 deadline_at: None,
             };
@@ -720,9 +747,10 @@ impl TableRuntimeState {
         if matches!(self.status, TableStatus::InGame) {
             if let Some(ref g) = self.game {
                 if matches!(g.phase, GamePhase::Scoring) && self.waiting_next_hand_ready {
+                    let actor_player_ids = self.unready_player_ids();
                     return Expect {
                         kind: "ready".into(),
-                        actor_player_id: None,
+                        actor_player_ids: actor_player_ids.clone(),
                         legal_actions: vec!["ready".into()],
                         deadline_at: None,
                     };
@@ -731,14 +759,14 @@ impl TableRuntimeState {
             }
             return Expect {
                 kind: "wait".into(),
-                actor_player_id: None,
+                actor_player_ids: vec![],
                 legal_actions: vec![],
                 deadline_at: None,
             };
         }
         Expect {
             kind: "wait".into(),
-            actor_player_id: None,
+            actor_player_ids: vec![],
             legal_actions: vec![],
             deadline_at: None,
         }

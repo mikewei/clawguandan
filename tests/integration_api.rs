@@ -163,6 +163,92 @@ async fn create_ready_table_with_store_and_rank(
 }
 
 #[tokio::test]
+async fn ready_expect_lists_all_unready_actor_ids() {
+    let app = app_with_store(TableStore::new());
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/tables")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let v = read_json(res).await;
+    let table_id = v["tableId"].as_str().unwrap().to_string();
+
+    let mut pids = Vec::new();
+    for i in 0..4 {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/tables/{}/join", table_id))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        json!({
+                            "playerName": format!("P{}", i),
+                            "seat": "auto",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = read_json(res).await;
+        pids.push(body["playerId"].as_str().unwrap().to_string());
+    }
+
+    let before_ready = snapshot_player(&app, &table_id, &pids[0]).await;
+    assert_eq!(before_ready["expect"]["kind"], "ready");
+    assert_eq!(
+        before_ready["expect"]["actorPlayerIds"].as_array(),
+        Some(&vec![
+            json!(pids[0].as_str()),
+            json!(pids[1].as_str()),
+            json!(pids[2].as_str()),
+            json!(pids[3].as_str()),
+        ])
+    );
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/tables/{}/ready", table_id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "playerId": &pids[0],
+                        "ready": true,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    let after_ready = snapshot_player(&app, &table_id, &pids[1]).await;
+    assert_eq!(after_ready["expect"]["kind"], "ready");
+    assert_eq!(
+        after_ready["expect"]["actorPlayerIds"].as_array(),
+        Some(&vec![
+            json!(pids[1].as_str()),
+            json!(pids[2].as_str()),
+            json!(pids[3].as_str()),
+        ])
+    );
+}
+
+#[tokio::test]
 async fn ping_returns_pong_and_version() {
     let app = app_with_store(TableStore::new());
     let res = app
@@ -663,8 +749,8 @@ async fn finishing_player_is_recorded_and_next_actor_skips_empty_seat() {
     let snap = snapshot_player(&app, &table_id, &pids[2]).await;
     assert_eq!(snap["expect"]["kind"], "play");
     assert_eq!(
-        snap["expect"]["actorPlayerId"].as_str(),
-        Some(pids[2].as_str())
+        snap["expect"]["actorPlayerIds"].as_array(),
+        Some(&vec![json!(pids[2].as_str())])
     );
     let finishing = snap["hand"]["finishingOrder"]
         .as_array()

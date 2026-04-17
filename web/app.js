@@ -607,8 +607,15 @@ function canCurrentPlayerAct(kind) {
   if (!state.expect.legalActions || !state.expect.legalActions.includes(kind)) {
     return false;
   }
-  const actor = state.expect.actorPlayerId;
-  return !actor || actor === state.session.playerId;
+  const actorIds = getExpectActorIds(state.expect);
+  if (actorIds.length) {
+    return actorIds.includes(state.session.playerId);
+  }
+  if (state.expect.kind === "ready" && state.tableState) {
+    const mine = getSeatInfoByPlayerId(state.tableState, state.session.playerId);
+    return Boolean(mine && !mine.info?.ready);
+  }
+  return false;
 }
 
 async function sendReady() {
@@ -655,6 +662,19 @@ function selectedCardsFromPrivate() {
 
 function resolveSeatByPlayerId(table, playerId) {
   return getSeatInfoByPlayerId(table, playerId)?.seat || "";
+}
+
+function getExpectActorIds(expect) {
+  if (!expect || typeof expect !== "object") return [];
+  const ids = Array.isArray(expect.actorPlayerIds) ? expect.actorPlayerIds : [];
+  return ids
+    .map((id) => String(id || "").trim())
+    .filter(Boolean);
+}
+
+function getPrimaryExpectActorId(expect) {
+  const ids = getExpectActorIds(expect);
+  return ids[0] || "";
 }
 
 function resolveTributeContext(actionType, actorPlayerId, actionCard, tableAfterApply) {
@@ -957,7 +977,7 @@ function playerNameText(info) {
 }
 
 function actorDisplayText(table) {
-  const actorId = state.expect?.actorPlayerId;
+  const actorId = getPrimaryExpectActorId(state.expect);
   if (!actorId) return t("turnUnknown");
   const actorSeat = getSeatInfoByPlayerId(table, actorId);
   if (!actorSeat) return t("turnUnknown");
@@ -1242,7 +1262,7 @@ function buildSeatTags(table, seat, info) {
   return tags;
 }
 
-function buildSeatCard(table, seat, info, actorPlayerId, mySeat, finishRankBySeat) {
+function buildSeatCard(table, seat, info, actorPlayerIds, mySeat, finishRankBySeat) {
   const relativeSeat = toRelativeSeat(seat, mySeat);
   const item = document.createElement("div");
   item.className = `seat-box seat-${relativeSeatToCss(relativeSeat)}`;
@@ -1258,7 +1278,7 @@ function buildSeatCard(table, seat, info, actorPlayerId, mySeat, finishRankBySea
   if (isOccupied && seat === mySeat) {
     item.classList.add("is-self");
   }
-  if (isOccupied && actorPlayerId && info.playerId === actorPlayerId) {
+  if (isOccupied && info.playerId && actorPlayerIds.includes(info.playerId)) {
     item.classList.add("current-turn");
   }
   if (!isOccupied) return item;
@@ -1319,7 +1339,7 @@ function renderPortraitSeatOverview(table, mySeat, finishRankBySeat) {
       table,
       seat,
       info,
-      state.expect?.actorPlayerId,
+      getExpectActorIds(state.expect),
       mySeat,
       finishRankBySeat,
     );
@@ -1488,13 +1508,16 @@ function renderTables() {
     head.className = "table-card-head";
     const tableId = document.createElement("div");
     tableId.className = "table-id";
-    tableId.textContent = tableTitleText(tableState, item);
-    tableId.title = String(tableState.tableId || "");
+    const tableDisplayTitle = tableTitleText(tableState, item);
+    tableId.textContent = tableDisplayTitle;
+    tableId.title = tableDisplayTitle;
     const badge = document.createElement("div");
     badge.className = "table-badge";
-    badge.textContent = tf("tableCardBadge", {
+    const badgeText = tf("tableCardBadge", {
       status: formatTableStatusLabel(tableState.status, tableState.phase),
     });
+    badge.textContent = badgeText;
+    badge.title = badgeText;
     head.appendChild(tableId);
     head.appendChild(badge);
     node.appendChild(head);
@@ -1549,14 +1572,18 @@ function renderTables() {
         seatLabel.textContent = pos;
         const name = document.createElement("div");
         name.className = "seat-name";
-        name.textContent = player.playerName || "-";
+        const displaySeatName = player.playerName || "-";
+        name.textContent = displaySeatName;
+        name.title = displaySeatName;
         const status = document.createElement("div");
         const isAway = String(player?.presence || "").toLowerCase() === "away";
         const ready = Boolean(player.ready);
         status.className = `seat-status ${
           isAway ? "seat-status-away" : ready ? "seat-status-ready" : "seat-status-waiting"
         }`;
-        status.textContent = isAway ? t("stateAway") : ready ? t("stateReady") : t("stateWaiting");
+        const statusText = isAway ? t("stateAway") : ready ? t("stateReady") : t("stateWaiting");
+        status.textContent = statusText;
+        status.title = statusText;
         cell.appendChild(seatLabel);
         cell.appendChild(name);
         cell.appendChild(status);
@@ -1615,9 +1642,10 @@ function render() {
     : t("noSessionYet");
   el.promptInfo.textContent = state.prompt || "";
   const legalActions = state.expect?.legalActions || [];
+  const actorIds = getExpectActorIds(state.expect);
   el.expectInfo.textContent = state.expect ? tf("expectSummary", {
     kind: state.expect.kind,
-    actor: state.expect.actorPlayerId || "-",
+    actor: actorIds.length ? actorIds.join(",") : "-",
     legal: legalActions.join(","),
   }) : "";
   el.tableLegalActions.textContent = legalActions.length
@@ -1684,7 +1712,7 @@ function render() {
       table,
       seat,
       table.seats?.[seat] || null,
-      state.expect?.actorPlayerId,
+      actorIds,
       mySeat,
       finishRankBySeat,
     ));
@@ -1704,7 +1732,7 @@ function render() {
   // Main table trick layer should only reflect current trick actions.
   // This clears stale cards from other seats right after a new lead play.
   const latestTrick = buildLatestTrickBySeat(sliceCurrentTrickHistory(history));
-  const actorSeat = getSeatInfoByPlayerId(table, state.expect?.actorPlayerId || "")?.seat || null;
+  const actorSeat = getSeatInfoByPlayerId(table, getPrimaryExpectActorId(state.expect))?.seat || null;
   const nextTrickLayerSig = latestTrickSignature(latestTrick, topPlay?.seat || null, mySeat, actorSeat);
   if (nextTrickLayerSig !== renderCache.trickLayerSig) {
     renderTrickLayer(mySeat, latestTrick, topPlay?.seat || null, isLeadTurn, actorSeat);

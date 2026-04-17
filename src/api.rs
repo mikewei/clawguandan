@@ -151,6 +151,8 @@ async fn list_tables(
 pub struct JoinBody {
     #[serde(default)]
     pub player_type: Option<PlayerType>,
+    #[serde(default)]
+    pub player_model: Option<String>,
     pub player_name: String,
     #[serde(default = "default_seat_auto")]
     pub seat: String,
@@ -166,6 +168,8 @@ pub struct JoinResponse {
     pub player_id: String,
     pub seat: String,
     pub player_type: PlayerType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub player_model: Option<String>,
     pub new_seq: u64,
 }
 
@@ -175,15 +179,22 @@ async fn join_table(
     Json(body): Json<JoinBody>,
 ) -> Result<Json<JoinResponse>, AppError> {
     let seat = SeatOrAuto::parse(&body.seat)?;
-    let (pid, seat, pt) = state
+    let (pid, seat, pt, player_model) = state
         .store
-        .join(&table_id, body.player_name, body.player_type, seat)
+        .join(
+            &table_id,
+            body.player_name,
+            body.player_type,
+            body.player_model,
+            seat,
+        )
         .await?;
     let snap = state.store.get_snapshot(&table_id).await?;
     Ok(Json(JoinResponse {
         player_id: pid,
         seat: seat.as_str().into(),
         player_type: pt,
+        player_model,
         new_seq: snap.seq,
     }))
 }

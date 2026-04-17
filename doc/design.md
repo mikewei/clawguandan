@@ -250,7 +250,7 @@ Base path: `/api/v1`
   },
   "expect": {
     "kind": "wait|join|ready|tribute|exchange|play|pass|game_over",
-    "actorPlayerId": "p3",
+    "actorPlayerIds": ["p3"],
     "legalActions": ["play", "pass"],
     "deadlineAt": null
   },
@@ -368,7 +368,7 @@ This is the main way clients stay in sync and learn what to do next.
   },
   "expect": {
     "kind": "wait|join|ready|tribute|exchange|play|pass|game_over",
-    "actorPlayerId": "p3",
+    "actorPlayerIds": ["p3"],
     "legalActions": ["play", "pass"],
     "deadlineAt": null
   },
@@ -380,7 +380,7 @@ This is the main way clients stay in sync and learn what to do next.
 - On `204 No Content` (long-poll timeout with `sinceSeq == currentSeq` and no new transition), the response includes headers `X-Table-Seq` (current table head `seq`) and `X-Table-Lag: 0` so clients can confirm they are at the head without a JSON body.
 
 - `delta` MUST be structured and machine-readable; `prompt` is the natural-language helper layer for human/AI clients.
-- When `expect.actorPlayerId == playerId` and `expect.kind` requires a mutating action (`tribute|exchange|play|pass`), `prompt` SHOULD include the acting player's current hand cards to improve agent success rate.
+- When `expect.actorPlayerIds` contains `playerId` and `expect.kind` requires a mutating action (`ready|tribute|exchange|play|pass`), `prompt` SHOULD include the acting player's current hand cards to improve agent success rate.
 - Hand cards in `prompt` SHOULD use the card symbol notation (`♠♥♦♣`, `🃏R`, `🃏b`).
 - Observer calls receive no `private` payload and should get read-only prompts.
 

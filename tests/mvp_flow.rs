@@ -305,8 +305,8 @@ async fn create_join_ready_game_started_flow() {
     assert_eq!(t_last["type"], "GAME_STARTED");
     assert_eq!(t_last["expect"]["kind"], "play");
     assert_eq!(
-        t_last["expect"]["actorPlayerId"].as_str(),
-        Some(pids[0].as_str()),
+        t_last["expect"]["actorPlayerIds"].as_array(),
+        Some(&vec![json!(pids[0].as_str())]),
         "first joiner sits E; first hand opens at E"
     );
     // Observer mode: `private` must not be present.
@@ -319,6 +319,173 @@ async fn create_join_ready_game_started_flow() {
         t_last["delta"]["event"]["trigger"]["actorPlayerId"].as_str(),
         Some(last_pid.as_str())
     );
+}
+
+#[tokio::test]
+async fn join_player_model_only_effective_for_ai() {
+    let app = app_with_store(TableStore::new());
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/tables")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let v = read_json(res).await;
+    let table_id = v["tableId"].as_str().unwrap().to_string();
+
+    let ai_join = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/tables/{}/join", table_id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "playerName": "AI-E",
+                        "playerType": "ai",
+                        "playerModel": "  gpt-4o  ",
+                        "seat": "E",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(ai_join.status(), StatusCode::OK);
+    let ai_body = read_json(ai_join).await;
+    assert_eq!(ai_body["playerType"], "ai");
+    assert_eq!(ai_body["playerModel"], "gpt-4o");
+
+    let human_join = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/tables/{}/join", table_id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "playerName": "H-S",
+                        "playerType": "human",
+                        "playerModel": "ignored-model",
+                        "seat": "S",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(human_join.status(), StatusCode::OK);
+    let human_body = read_json(human_join).await;
+    assert!(human_body["playerModel"].is_null());
+
+    let unknown_join = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/tables/{}/join", table_id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "playerName": "U-W",
+                        "playerModel": "ignored-too",
+                        "seat": "W",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(unknown_join.status(), StatusCode::OK);
+    let unknown_body = read_json(unknown_join).await;
+    assert_eq!(unknown_body["playerType"], "unknown");
+    assert!(unknown_body["playerModel"].is_null());
+
+    let snap_res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/tables/{}/snapshot", table_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(snap_res.status(), StatusCode::OK);
+    let snap = read_json(snap_res).await;
+    assert_eq!(snap["seats"]["E"]["playerModel"], "gpt-4o");
+    assert!(snap["seats"]["S"]["playerModel"].is_null());
+    assert!(snap["seats"]["W"]["playerModel"].is_null());
+}
+
+#[tokio::test]
+async fn join_ai_with_blank_model_normalizes_to_none() {
+    let app = app_with_store(TableStore::new());
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/tables")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let v = read_json(res).await;
+    let table_id = v["tableId"].as_str().unwrap().to_string();
+
+    let join = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/tables/{}/join", table_id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "playerName": "AI-E",
+                        "playerType": "ai",
+                        "playerModel": "   ",
+                        "seat": "E",
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(join.status(), StatusCode::OK);
+    let join_body = read_json(join).await;
+    assert!(join_body["playerModel"].is_null());
+
+    let snap_res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/tables/{}/snapshot", table_id))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(snap_res.status(), StatusCode::OK);
+    let snap = read_json(snap_res).await;
+    assert!(snap["seats"]["E"]["playerModel"].is_null());
 }
 
 #[tokio::test]

@@ -133,8 +133,9 @@ impl TableStore {
         table_id: &str,
         player_name: String,
         player_type: Option<PlayerType>,
+        player_model: Option<String>,
         seat: SeatOrAuto,
-    ) -> Result<(String, Seat, PlayerType), AppError> {
+    ) -> Result<(String, Seat, PlayerType, Option<String>), AppError> {
         let arc = {
             let g = self.tables.lock().await;
             g.get(table_id)
@@ -153,6 +154,7 @@ impl TableStore {
 
         let seat = Self::pick_seat(&inner.state, seat)?;
         let pt = player_type.unwrap_or_default();
+        let player_model = normalize_player_model(pt.clone(), player_model);
         let pid = format!("p_{}", uuid::Uuid::new_v4());
         let prev_snapshot = inner.state.to_table_state();
         let prev_seq = inner.state.seq;
@@ -163,6 +165,7 @@ impl TableStore {
                 player_id: pid.clone(),
                 player_name,
                 player_type: pt.clone(),
+                player_model: player_model.clone(),
                 presence: PlayerPresence::Active,
                 ready: false,
                 last_activity_at: std::time::Instant::now(),
@@ -191,7 +194,7 @@ impl TableStore {
         });
         inner.notify.notify_waiters();
 
-        Ok((pid, seat, pt))
+        Ok((pid, seat, pt, player_model))
     }
 
     pub async fn set_ready(
@@ -657,7 +660,7 @@ impl TableStore {
                 .flatten()
                 .find(|p| p.player_id == pid)
                 .map(|p| p.ready);
-            let is_actor = body.expect.actor_player_id.as_deref() == Some(pid);
+            let is_actor = body.expect.actor_player_ids.iter().any(|id| id == pid);
             body.prompt = Some(build_player_prompt(&body.expect, mine_ready, is_actor));
             body.private = snap.private_view_for_player(pid);
         } else {
@@ -1063,6 +1066,20 @@ fn build_transition(
         transition_type: transition_type.into(),
         delta,
     }
+}
+
+fn normalize_player_model(player_type: PlayerType, player_model: Option<String>) -> Option<String> {
+    if !matches!(player_type, PlayerType::Ai) {
+        return None;
+    }
+    player_model.and_then(|m| {
+        let trimmed = m.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
 }
 
 #[cfg(feature = "test-utils")]

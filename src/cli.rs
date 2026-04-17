@@ -388,6 +388,9 @@ pub(crate) enum SimulateCmd {
         /// Optional existing table ID to join. If omitted, creates a fresh table.
         #[arg(short = 't', long)]
         table: Option<String>,
+        /// Starting rank/level for table creation (2-10, J, Q, K, A). Only valid when creating a new table.
+        #[arg(long)]
+        rank: Option<String>,
         /// Number of bots to join. If omitted, auto-fills all current vacancies.
         #[arg(long)]
         players: Option<u8>,
@@ -452,6 +455,9 @@ pub(crate) enum TableCmd {
         name: String,
         #[arg(long)]
         r#type: Option<String>,
+        /// AI model name. Effective only when `--type ai`.
+        #[arg(long)]
+        model: Option<String>,
         #[arg(long, default_value = "auto")]
         seat: String,
         /// Skip `table sync` after join (default: sync updates session; stdout is join API JSON only)
@@ -597,9 +603,10 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 table_id,
                 name,
                 r#type,
+                model,
                 seat,
                 no_sync,
-            } => table_join(table_id, name, r#type, seat, no_sync),
+            } => table_join(table_id, name, r#type, model, seat, no_sync),
             TableCmd::Nextstate {
                 table_id,
                 player_id,
@@ -619,9 +626,10 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
         Top::Simulate { cmd } => match cmd {
             SimulateCmd::Cliplay {
                 table,
+                rank,
                 players,
                 hands,
-            } => simulate_cliplay_subprocess(table, players, hands),
+            } => simulate_cliplay_subprocess(table, rank, players, hands),
         },
         Top::Play { cmd } => match cmd {
             PlayCmd::Ready {
@@ -990,14 +998,8 @@ fn table_snapshot(table_id: String, player_id: Option<String>) -> Result<(), Str
 
 fn cli_needs_my_action(state: &TableState, player_id: &str) -> bool {
     let exp = &state.expect;
-    if exp.kind == "ready" {
-        return exp.legal_actions.iter().any(|a| a == "ready")
-            && state
-                .seats
-                .values()
-                .any(|s| s.player_id.as_deref() == Some(player_id) && !s.ready);
-    }
-    if exp.actor_player_id.as_deref() != Some(player_id) {
+    let actor_match = exp.actor_player_ids.iter().any(|id| id == player_id);
+    if !actor_match {
         return false;
     }
     match exp.kind.as_str() {
@@ -1171,6 +1173,7 @@ fn table_join(
     table_id: String,
     name: String,
     player_type: Option<String>,
+    model: Option<String>,
     seat: String,
     no_sync: bool,
 ) -> Result<(), String> {
@@ -1183,6 +1186,9 @@ fn table_join(
     });
     if let Some(t) = pt {
         body["playerType"] = json!(t);
+    }
+    if let Some(m) = model {
+        body["playerModel"] = json!(m);
     }
     let r = client
         .post(format!("{}/api/v1/tables/{}/join", base, table_id))
@@ -1526,30 +1532,16 @@ fn transition_counts_as_hand_done(v: &serde_json::Value) -> bool {
 fn expect_requires_action(state: &serde_json::Value, my_pid: &str) -> bool {
     let expect = state.get("expect").unwrap_or(&serde_json::Value::Null);
     let kind = expect.get("kind").and_then(|x| x.as_str()).unwrap_or("");
-    if kind == "ready" {
-        let legal_ready = expect
-            .get("legalActions")
-            .and_then(|x| x.as_array())
-            .map(|actions| actions.iter().any(|a| a.as_str() == Some("ready")))
-            .unwrap_or(false);
-        let mine_unready = state
-            .get("seats")
-            .and_then(|x| x.as_object())
-            .map(|seats| {
-                seats.values().any(|s| {
-                    s.get("playerId").and_then(|x| x.as_str()) == Some(my_pid)
-                        && !s.get("ready").and_then(|x| x.as_bool()).unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-        return legal_ready && mine_unready;
-    }
-    let actor = expect.get("actorPlayerId").and_then(|x| x.as_str());
-    if actor != Some(my_pid) {
+    let actor_match = expect
+        .get("actorPlayerIds")
+        .and_then(|x| x.as_array())
+        .map(|ids| ids.iter().any(|id| id.as_str() == Some(my_pid)))
+        .unwrap_or(false);
+    if !actor_match {
         return false;
     }
     match kind {
-        "play" | "tribute" | "exchange" => true,
+        "play" | "tribute" | "exchange" | "ready" => true,
         _ => false,
     }
 }
@@ -1562,11 +1554,18 @@ fn expect_has_uncontrolled_actor(
     if !matches!(kind, "play" | "tribute" | "exchange") {
         return None;
     }
-    let actor = expect.get("actorPlayerId").and_then(|x| x.as_str())?;
-    if controlled_pids.contains(actor) {
+    if let Some(ids) = expect.get("actorPlayerIds").and_then(|x| x.as_array()) {
+        for id in ids {
+            let Some(actor) = id.as_str() else {
+                continue;
+            };
+            if !controlled_pids.contains(actor) {
+                return Some(actor.to_string());
+            }
+        }
         return None;
     }
-    Some(actor.to_string())
+    None
 }
 
 fn player_action_to_cli_argv_auto(
@@ -1634,7 +1633,7 @@ mod tests {
     fn expect_has_uncontrolled_actor_detects_outside_actor() {
         let expect = json!({
             "kind": "play",
-            "actorPlayerId": "p_human",
+            "actorPlayerIds": ["p_human"],
             "legalActions": ["play", "pass"]
         });
         let controlled = HashSet::from(["p_bot1".to_string(), "p_bot2".to_string()]);
@@ -1648,8 +1647,33 @@ mod tests {
     fn expect_has_uncontrolled_actor_ignores_non_action_kinds() {
         let expect = json!({
             "kind": "wait",
-            "actorPlayerId": "p_human",
+            "actorPlayerIds": ["p_human"],
             "legalActions": []
+        });
+        let controlled = HashSet::from(["p_bot1".to_string()]);
+        assert!(expect_has_uncontrolled_actor(&expect, &controlled).is_none());
+    }
+
+    #[test]
+    fn expect_has_uncontrolled_actor_prefers_actor_ids_collection() {
+        let expect = json!({
+            "kind": "play",
+            "actorPlayerIds": ["p_bot1", "p_human"],
+            "legalActions": ["play", "pass"]
+        });
+        let controlled = HashSet::from(["p_bot1".to_string()]);
+        assert_eq!(
+            expect_has_uncontrolled_actor(&expect, &controlled).as_deref(),
+            Some("p_human")
+        );
+    }
+
+    #[test]
+    fn expect_has_uncontrolled_actor_ignores_ready_kind() {
+        let expect = json!({
+            "kind": "ready",
+            "actorPlayerIds": ["p_bot1", "p_human"],
+            "legalActions": ["ready"]
         });
         let controlled = HashSet::from(["p_bot1".to_string()]);
         assert!(expect_has_uncontrolled_actor(&expect, &controlled).is_none());
@@ -1734,6 +1758,7 @@ impl CliplayShared {
 
 fn simulate_cliplay_subprocess(
     table: Option<String>,
+    rank: Option<String>,
     players: Option<u8>,
     hands: u32,
 ) -> Result<(), String> {
@@ -1750,13 +1775,24 @@ fn simulate_cliplay_subprocess(
     println!("--- simulate cliplay: hands={hands} (observer + bots; subprocess CLI; auto-seq) ---");
 
     let table_id = if let Some(tid) = table {
+        if rank.is_some() {
+            return Err("--rank is only allowed when creating a new table (omit --table)".into());
+        }
         println!("\n### [table target]\nusing existing table: {tid}");
         tid
     } else {
         let label = "table create";
-        println!("\n### [{label}]\n$ clawguandan table create simulate-cliplay");
-        let out = run_cli_command(&bin, &["table", "create", "simulate-cliplay"])
-            .map_err(|e| e.to_string())?;
+        let mut create_args = vec![
+            "table".to_string(),
+            "create".to_string(),
+            "simulate-cliplay".to_string(),
+        ];
+        if let Some(rank) = rank.as_deref() {
+            create_args.push("--rank".to_string());
+            create_args.push(rank.to_string());
+        }
+        println!("\n### [{label}]\n$ clawguandan {}", create_args.join(" "));
+        let out = run_cli_command(&bin, &create_args).map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&out.stdout);
         println!("<< stdout:\n{stdout}");
         let create_v = parse_cli_stdout_json(&out.stdout)?;

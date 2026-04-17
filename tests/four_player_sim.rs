@@ -38,26 +38,36 @@ fn engine_suggest_play_one_hand_reaches_scoring() {
 }
 
 /// [`GameEngine::start_next_hand_with_tribute`] needs a four-seat finishing order; movegen should list tribute candidates.
+///
+/// Tribute can be **canceled** (抗贡) when payers collectively hold enough red jokers; that skips `Tribute` and opens in
+/// `Playing`. This test searches a small RNG seed range until the deal does not cancel, so assertions stay stable.
 #[test]
 fn second_hand_enters_tribute_after_synthetic_finishing_order() {
-    let eng = GameEngine::new(GameConfig { rng_seed: 5 });
-    let mut state = TableGameState::new("t_syn".into());
-    state.phase = GamePhase::Scoring;
-    let mut hand = HandState::new(clawguandan::game::card::HandLevel::Two);
-    hand.finishing_order = vec![Seat::E, Seat::S, Seat::W, Seat::N];
-    for s in Seat::ALL {
-        hand.hands.insert(s, vec![]);
+    const FINISHING: [Seat; 4] = [Seat::E, Seat::S, Seat::W, Seat::N];
+    let mut state = None;
+    for seed in 0u64..500 {
+        let eng = GameEngine::new(GameConfig { rng_seed: seed });
+        let mut st = TableGameState::new("t_syn".into());
+        st.phase = GamePhase::Scoring;
+        let mut hand = HandState::new(clawguandan::game::card::HandLevel::Two);
+        hand.finishing_order = FINISHING.to_vec();
+        for s in Seat::ALL {
+            hand.hands.insert(s, vec![]);
+        }
+        st.hand = Some(hand);
+        st.winner_team = Some(TeamId::Ew);
+        if eng
+            .start_next_hand_with_tribute(&mut st, TeamId::Ew, HandLevel::Two, &FINISHING)
+            .is_err()
+        {
+            continue;
+        }
+        if st.phase == GamePhase::Tribute {
+            state = Some(st);
+            break;
+        }
     }
-    state.hand = Some(hand);
-    state.winner_team = Some(TeamId::Ew);
-    eng.start_next_hand_with_tribute(
-        &mut state,
-        TeamId::Ew,
-        HandLevel::Two,
-        &[Seat::E, Seat::S, Seat::W, Seat::N],
-    )
-    .expect("next hand");
-    assert_eq!(state.phase, GamePhase::Tribute);
+    let state = state.expect("expected some rng_seed < 500 to deal a non-canceled tribute");
     let actor = clawguandan::strategy::current_actor_seat(&state).expect("tribute actor");
     let legal = enumerate_legal_actions(&state, actor).expect("legal");
     assert!(
@@ -97,8 +107,8 @@ async fn http_router_hand_until_scoring_smoke() {
 
     let mut pids = Vec::new();
     for _ in 0..4 {
-        let (pid, _, _) = store
-            .join(&table_id, "p".into(), None, SeatOrAuto::Auto)
+        let (pid, _, _, _) = store
+            .join(&table_id, "p".into(), None, None, SeatOrAuto::Auto)
             .await
             .unwrap();
         pids.push(pid);

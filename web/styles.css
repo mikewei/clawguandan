@@ -355,8 +355,9 @@ button:disabled {
 
 .lobby-tables {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 20px;
+  min-width: 0;
 }
 
 .tables-empty-hint {
@@ -368,9 +369,12 @@ button:disabled {
   background: rgba(0, 0, 0, 0.24);
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 12px;
-  padding: 10px;
+  padding: 12px 12px 10px;
   display: grid;
   gap: 10px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .table-card:hover {
@@ -381,26 +385,35 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+  min-width: 0;
 }
 
 .table-id {
   font-weight: 700;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .table-badge {
+  flex-shrink: 0;
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 0.75rem;
   border: 1px solid rgba(255, 255, 255, 0.22);
   background: rgba(255, 255, 255, 0.08);
+  white-space: nowrap;
 }
 
 .table-seat-map {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   grid-template-rows: repeat(3, auto);
-  gap: 4px;
+  gap: 6px;
+  min-width: 0;
 }
 
 .table-seat-center-rank {
@@ -408,15 +421,21 @@ button:disabled {
   align-items: center;
   justify-content: center;
   min-height: 40px;
+  min-width: 0;
+  padding: 0 2px;
   color: rgba(255, 255, 255, 0.52);
   font-size: 0.72rem;
   font-weight: 500;
   text-align: center;
   letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .table-seat-cell {
   min-height: 52px;
+  min-width: 0;
   border-radius: 8px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.04);
@@ -448,6 +467,7 @@ button:disabled {
 }
 
 .seat-name {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -457,8 +477,12 @@ button:disabled {
 }
 
 .seat-status {
+  min-width: 0;
   font-size: 0.78rem;
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .seat-status-idle {
@@ -498,6 +522,12 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.table-card-actions button {
+  flex-shrink: 0;
 }
 
 .table-card-create {

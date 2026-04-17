@@ -43,9 +43,10 @@ mod tests {
     use super::*;
 
     fn expect(kind: &str, actor: Option<&str>) -> Expect {
+        let actor_player_ids = actor.map(|x| x.to_string()).into_iter().collect::<Vec<_>>();
         Expect {
             kind: kind.to_string(),
-            actor_player_id: actor.map(|x| x.to_string()),
+            actor_player_ids,
             legal_actions: Vec::new(),
             deadline_at: None,
         }

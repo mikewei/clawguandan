@@ -17,12 +17,14 @@ cargo run --bin clawguandan -- server use 127.0.0.1:22222
 cargo run --bin clawguandan -- table create "Friday"
 cargo run --bin clawguandan -- table create "Friday" --rank 8
 cargo run --bin clawguandan -- table join -t <tableId> --name Alice --seat auto
+cargo run --bin clawguandan -- table join -t <tableId> --name Bot-S --type ai --model gpt-4o --seat auto
 # 先 `table nextstate` 同步 lastAppliedSeq（写入 temp 下按会话的 session.json），再 `play ready`（auto-seq）
 cargo run --bin clawguandan -- table nextstate -t <tableId> -p <playerId>
 cargo run --bin clawguandan -- play ready -t <tableId> -p <playerId>
 ```
 
 `table create` 不传 `--rank` 时默认从 `2` 开始；可选值为 `2-10/J/Q/K/A`。
+`table join --model` 仅在 `--type ai` 时生效；非 AI 类型会静默忽略该字段。
 
 `clawguandan server new` 会后台启动同一个二进制，并运行 `server serve`。（可通过 `CLAW_GUANDAN_SERVER_BIN` 指定路径）
 
