@@ -50,7 +50,7 @@ clawguandan show rules
 3) Confirm with the user how many **AI players** should join; pick a short and **cool** **player name** for each.
 4) For each player, join: `clawguandan table join -t <tableId> --name "<playerName>" --type ai --model "<llmModelName>"`, and read the `playerId` in the output carefully.
 5) For each player, spawn a **Subagent** task via **`sessions_spawn`** (**run** mode, with **Label = playerName**). Build a **complete** task prompt that **must** include:
-   - An **explicit** prompt whose text includes: `Read Guandan Skill, and execute "task management strategy"`.
+   - An **explicit** prompt whose text includes: `Read Guandan Skill, and execute "Subagent execution flow"`.
    - Key fields such as `tableId`, `playerId`, etc.: values must be **exact**; wrap each value in **double quotes** (e.g. `"..."`).
    - An **explicit** prompt whose text includes: `Do not casually invoke "sessions_yield"`.
 6) Update `TOOLS.md` by writing a new `### guandan pending ###` subsection. It **must** include:
