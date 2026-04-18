@@ -531,9 +531,6 @@ async fn snapshot(
     Path(table_id): Path<String>,
     Query(q): Query<SnapshotQuery>,
 ) -> Result<Json<SnapshotResponse>, AppError> {
-    if let Some(pid) = q.player_id.as_deref() {
-        state.store.touch_player_activity(&table_id, pid).await?;
-    }
     let snap = state.store.get_snapshot(&table_id).await?;
     if let Some(at_seq) = q.at_seq
         && at_seq != snap.seq
@@ -542,6 +539,17 @@ async fn snapshot(
             "snapshot atSeq {} is not supported in MVP; currentSeq {}",
             at_seq, snap.seq
         )));
+    }
+    if let Some(ref pid) = q.player_id {
+        if snap.seat_for_player(pid).is_none() {
+            return Err(AppError::BadRequest(
+                "playerId is not seated at this table".into(),
+            ));
+        }
+        state
+            .store
+            .touch_player_activity(&table_id, pid.as_str())
+            .await?;
     }
 
     let table_state = snap.to_table_state();

@@ -993,3 +993,76 @@ async fn inactive_player_marks_away_and_ends_game_without_scoring() {
         snap["narration"]
     );
 }
+
+#[tokio::test]
+async fn snapshot_and_nextstate_reject_unseated_player_id() {
+    let app = app_with_store(TableStore::new());
+    let (app, table_id, pids, seq) = create_ready_table_with_store(app).await;
+
+    let bogus = "bogus_player_not_at_table";
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/v1/tables/{}/snapshot?playerId={}",
+                    table_id, bogus
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let err = read_json(res).await;
+    assert_eq!(err["error"]["code"], "BAD_REQUEST");
+    assert!(
+        err["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not seated")
+    );
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=0&playerId={}",
+                    table_id, seq, bogus
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let err = read_json(res).await;
+    assert_eq!(err["error"]["code"], "BAD_REQUEST");
+
+    let snap = snapshot_player(&app, &table_id, &pids[0]).await;
+    assert!(snap.get("error").is_none());
+    assert!(snap.get("seq").is_some());
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=0&playerId={}",
+                    table_id, seq, pids[0]
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        res.status() == StatusCode::OK || res.status() == StatusCode::NO_CONTENT,
+        "expected OK or NO_CONTENT, got {:?}",
+        res.status()
+    );
+}

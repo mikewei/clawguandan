@@ -50,7 +50,7 @@ clawguandan show rules
 3) Confirm with the user how many **AI players** should join; pick a short and **cool** **player name** for each.
 4) For each player, join: `clawguandan table join -t <tableId> --name "<playerName>" --type ai --model "<llmModelName>"`, and read the `playerId` in the output carefully.
 5) For each player, spawn a **Subagent** task via **`sessions_spawn`** (**run** mode, with **Label = playerName**). Build a **complete** task prompt that **must** include:
-   - An **explicit** prompt whose text includes: `Read Guandan Skill, and execute "Subagent execution flow"`.
+   - An **explicit** prompt whose text includes: `Ignore all previous game history, read Guandan Skill, and execute "Subagent execution flow" from start`.
    - Key fields such as `tableId`, `playerId`, etc.: values must be **exact**; wrap each value in **double quotes** (e.g. `"..."`).
    - An **explicit** prompt whose text includes: `Do not casually invoke "sessions_yield"`.
 6) Update `TOOLS.md` by writing a new `### guandan pending ###` subsection. It **must** include:
@@ -61,7 +61,7 @@ clawguandan show rules
 ### Task management strategy
 
 1) Whenever you receive a Subagent completion message, if it does **not** include `[GAME OVER]`, **immediately** spawn a **new** Subagent for that player via **`sessions_spawn`**. Build a complete task prompt that includes:
-   - An **explicit** prompt whose text includes: `Read Guandan Skill, and execute "Subagent execution flow"`.
+   - An **explicit** prompt whose text includes: `Ignore all previous game history, read Guandan Skill, and execute "Subagent execution flow" from start`.
    - Key parameters such as `tableId`, `playerId`, etc. — **exact** literals, each wrapped in **double quotes**.
    - The summary returned by the just-finished Subagent.
    - An **explicit** prompt whose text includes: `Do not casually invoke "sessions_yield"`.
@@ -81,9 +81,9 @@ clawguandan show rules
 ## Subagent execution flow
 
 1) Read the Guandan game rules. If you have not find it, run: `clawguandan show rules`
-2) **Repeat** the following flow at most **3** times:
+2) **Repeat** the following flow until game over:
 
-   1. Run: `play wait4myturn -t <tableId> -p <playerId>`. It may block for a while, be patient and use timeout of 120000 when using process poll/log.
+   1. Run: `play wait4myturn -t <tableId> -p <playerId>`. It may block for a while, be patient and use timeout of 60000 when using process poll/log.
    2. Read the returned JSON; focus on:
       - `status` / `phase`
       - `expect.kind`
@@ -91,8 +91,9 @@ clawguandan show rules
       - `expect.legalActions`
       - `private.handCards` (if present)
       - `hand.topPlay` (if present)
-   3. If your `playerId` is **not** in `actorPlayerIds`, continue with `wait4myturn`.
-   4. If `expect.kind` requires you to act, execute **one** action from `expect.legalActions` using the policy below.
+   3. Only if `status` is `finished` (that means game over), then quit from the loop, otherwise go on.
+   4. If your `playerId` is **not** in `actorPlayerIds`, continue with `wait4myturn`.
+   5. If `expect.kind` requires you to act, execute **one** action from `expect.legalActions` using the policy below.
 
 3) When you finish via **`sessions_yield`**, return results **explicitly**:
    - If the game is **not** over, you **must** return explicitly: `<playerId>: Guandan game in progress; please sessions_spawn another Subagent for me`

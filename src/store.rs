@@ -655,6 +655,12 @@ impl TableStore {
         timeout: Option<Duration>,
     ) -> Result<Option<NextStateBody>, AppError> {
         if let Some(pid) = player_id {
+            let snap = self.get_snapshot(table_id).await?;
+            if snap.seat_for_player(pid).is_none() {
+                return Err(AppError::BadRequest(
+                    "playerId is not seated at this table".into(),
+                ));
+            }
             self.touch_player_activity(table_id, pid).await?;
         }
         let body = self.next_state(table_id, since_seq, timeout).await?;
