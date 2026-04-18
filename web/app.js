@@ -48,7 +48,9 @@ const el = {
   tableView: document.getElementById("tableView"),
   portraitSeatOverview: document.getElementById("portraitSeatOverview"),
   portraitSeatGrid: document.getElementById("portraitSeatGrid"),
+  portraitTableInPlayTitle: document.getElementById("portraitTableInPlayTitle"),
   tableStage: document.getElementById("tableStage"),
+  tableInPlayTitle: document.getElementById("tableInPlayTitle"),
   tablesList: document.getElementById("tablesList"),
   tablesEmptyHint: document.getElementById("tablesEmptyHint"),
   refreshTablesBtn: document.getElementById("refreshTablesBtn"),
@@ -1442,12 +1444,6 @@ function renderTrickLayer(mySeat, latestTrickBySeat, topPlaySeat, isLeadTurn, ac
   }
 }
 
-function shortTableId(tableId) {
-  const raw = String(tableId || "");
-  if (!raw) return "-";
-  return raw.length <= 10 ? raw : `${raw.slice(0, 8)}...`;
-}
-
 function resolveNarrationText(rawNarration) {
   const raw = String(rawNarration || "").trim();
   if (!raw) return "";
@@ -1467,7 +1463,13 @@ function resolveNarrationText(rawNarration) {
 function tableTitleText(tableState, tableItem) {
   const name = String(tableState?.name || tableItem?.name || "").trim();
   if (name) return name;
-  return shortTableId(tableState?.tableId || "");
+  const id = String(
+    tableState?.tableId
+    || tableItem?.state?.tableId
+    || tableItem?.tableId
+    || "",
+  ).trim();
+  return id || "-";
 }
 
 function cardSymbolToSvgId(cardSymbol) {
@@ -1719,6 +1721,14 @@ function render() {
     el.tableNarration.classList.add("hidden");
     el.tableNarration.textContent = "";
     el.tableMeta.textContent = t("noTableSelected");
+    el.tableInPlayTitle.textContent = "";
+    el.tableInPlayTitle.removeAttribute("title");
+    el.tableInPlayTitle.classList.add("hidden");
+    el.tableInPlayTitle.setAttribute("aria-hidden", "true");
+    el.portraitTableInPlayTitle.textContent = "";
+    el.portraitTableInPlayTitle.removeAttribute("title");
+    el.portraitTableInPlayTitle.classList.add("hidden");
+    el.portraitTableInPlayTitle.setAttribute("aria-hidden", "true");
     el.tableTurnInfo.textContent = "";
     el.seatGrid.innerHTML = "";
     el.privateHand.innerHTML = "";
@@ -1738,9 +1748,25 @@ function render() {
     tableId: table.tableId,
     status: formatTableStatusLabel(table.status, table.phase),
   });
+  const inPlayTitle = tableTitleText(table, null);
+  el.tableInPlayTitle.textContent = inPlayTitle;
+  el.tableInPlayTitle.title = inPlayTitle;
+  el.portraitTableInPlayTitle.textContent = inPlayTitle;
+  el.portraitTableInPlayTitle.title = inPlayTitle;
   const mySeat = getMySeat(table);
   const portraitMode = isPortraitPhoneTableMode();
   const feedMode = shouldShowTableScene() && shouldUseTrickFeedMode(table, mySeat);
+  if (portraitMode) {
+    el.tableInPlayTitle.classList.add("hidden");
+    el.tableInPlayTitle.setAttribute("aria-hidden", "true");
+    el.portraitTableInPlayTitle.classList.remove("hidden");
+    el.portraitTableInPlayTitle.setAttribute("aria-hidden", "false");
+  } else {
+    el.portraitTableInPlayTitle.classList.add("hidden");
+    el.portraitTableInPlayTitle.setAttribute("aria-hidden", "true");
+    el.tableInPlayTitle.classList.remove("hidden");
+    el.tableInPlayTitle.setAttribute("aria-hidden", "false");
+  }
   el.portraitSeatOverview.classList.toggle("hidden", !portraitMode);
   el.tableView.classList.toggle("is-portrait-layout", portraitMode);
   el.tableStage.classList.toggle("is-feed-mode", feedMode);

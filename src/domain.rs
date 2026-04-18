@@ -211,6 +211,9 @@ pub struct Scoreboard {
 #[serde(rename_all = "camelCase")]
 pub struct TableState {
     pub table_id: String,
+    /// Human-facing table name from create-table metadata (same as list-tables `name`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
     pub seq: u64,
     pub status: TableStatus,
     pub phase: Phase,
@@ -705,6 +708,7 @@ impl TableRuntimeState {
 
         TableState {
             table_id: self.table_id.clone(),
+            name: self.table_name.clone(),
             seq: self.seq,
             status: self.status.clone(),
             phase: self.phase.clone(),

@@ -83,9 +83,13 @@
 
     <section id="tableView" class="scene scene-table hidden">
       <section id="portraitSeatOverview" class="panel portrait-seat-overview hidden">
-        <div id="portraitSeatGrid" class="portrait-seat-grid"></div>
+        <div class="portrait-seat-overview-body">
+          <div id="portraitTableInPlayTitle" class="table-in-play-title table-in-play-title-bar hidden" aria-hidden="true"></div>
+          <div id="portraitSeatGrid" class="portrait-seat-grid"></div>
+        </div>
       </section>
       <section id="tableStage" class="table-stage">
+        <div id="tableInPlayTitle" class="table-in-play-title table-in-play-title-floating hidden" aria-hidden="true"></div>
         <div class="table-surface">
           <div id="seatGrid" class="table-seats"></div>
           <div id="trickBySeat" class="trick-layer"></div>

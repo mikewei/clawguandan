@@ -600,6 +600,8 @@ button:disabled {
 .scene-table {
   gap: 12px;
   min-width: 0;
+  /* Match horizontal inset of `.panel` (e.g. action-dock “手牌区”) for table title alignment. */
+  --table-view-text-inset: 14px;
 }
 
 .turn-info {
@@ -616,6 +618,46 @@ button:disabled {
   position: relative;
   min-width: 0;
   overflow-x: clip;
+}
+
+.hand-area-title,
+.trick-feed-wrap > h3,
+.table-in-play-title {
+  margin: 0 0 10px 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.table-in-play-title {
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table-in-play-title-floating {
+  position: absolute;
+  top: 12px;
+  left: var(--table-view-text-inset);
+  z-index: 16;
+  max-width: min(280px, 52vw);
+  margin: 0;
+}
+
+.portrait-seat-overview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.table-in-play-title-bar {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  max-width: 100%;
+  padding-right: 4px;
+  margin-bottom: 0;
 }
 
 .table-stage.is-feed-mode .table-surface {
@@ -1171,11 +1213,6 @@ button:disabled {
   -webkit-user-select: none;
 }
 
-.hand-area-title {
-  font-weight: 700;
-  margin-bottom: 6px;
-}
-
 /* Private hand: tighter groups + more fan overlap (does not affect history / compact strips). */
 #privateHand.cards {
   gap: 5px;
@@ -1374,7 +1411,8 @@ button:disabled {
   }
 
   .portrait-seat-overview {
-    padding: 10px;
+    /* Horizontal padding matches `.panel` / action-dock so titles align with “手牌区”. */
+    padding: 10px var(--table-view-text-inset);
   }
 
   .portrait-seat-grid {
