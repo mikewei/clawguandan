@@ -25,6 +25,15 @@ use tokio::time::{Duration, sleep};
 
 const PLAYER_INACTIVITY_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
+/// First segment of hyphenated v4 UUID (8 hex chars before the first `-`).
+fn uuid_short_fragment() -> String {
+    let s = uuid::Uuid::new_v4().to_string();
+    s.split('-')
+        .next()
+        .expect("uuid string is hyphenated")
+        .to_string()
+}
+
 #[derive(Clone)]
 pub struct TableStore {
     tables: Arc<Mutex<HashMap<String, Arc<TableMutex>>>>,
@@ -66,7 +75,7 @@ impl TableStore {
         table_name: Option<String>,
         start_level: Level,
     ) -> TableRuntimeState {
-        let id = format!("t_{}", uuid::Uuid::new_v4());
+        let id = format!("t_{}", uuid_short_fragment());
         let state = TableRuntimeState::new_with_level(id.clone(), table_name, start_level);
         let inner = Arc::new(Mutex::new(TableInner {
             state,
@@ -155,7 +164,7 @@ impl TableStore {
         let seat = Self::pick_seat(&inner.state, seat)?;
         let pt = player_type.unwrap_or_default();
         let player_model = normalize_player_model(pt.clone(), player_model);
-        let pid = format!("p_{}", uuid::Uuid::new_v4());
+        let pid = format!("p_{}", uuid_short_fragment());
         let prev_snapshot = inner.state.to_table_state();
         let prev_seq = inner.state.seq;
 
@@ -620,6 +629,10 @@ impl TableStore {
                         private: None,
                         prompt,
                     }));
+                }
+                // At head: no further transitions will arrive after the table ends.
+                if matches!(inner.state.status, TableStatus::Finished) {
+                    return Ok(None);
                 }
                 // since_seq == current: subscribe then release lock before awaiting.
                 inner.notify.clone()

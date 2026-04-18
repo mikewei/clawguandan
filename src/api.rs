@@ -6,6 +6,7 @@ use crate::store::{SeatOrAuto, TableStore};
 use crate::strategy::{current_actor_seat, suggest_next_action};
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
+use axum::http::header;
 use axum::http::{HeaderName, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -40,6 +41,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/v1/tables/:table_id/snapshot", get(snapshot))
         .route("/api/v1/tables/:table_id/suggest", get(suggest))
+        .route("/api/v1/rules", get(rules))
         .fallback(get(crate::web_assets::serve_embedded))
         .with_state(state)
 }
@@ -50,6 +52,25 @@ async fn ping() -> Json<serde_json::Value> {
         "ver": env!("CARGO_PKG_VERSION"),
         "pid": std::process::id(),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RulesQuery {
+    #[serde(default)]
+    pub lang: Option<String>,
+}
+
+async fn rules(Query(q): Query<RulesQuery>) -> Result<impl IntoResponse, AppError> {
+    let md = crate::web_assets::rules_markdown(q.lang.as_deref()).map_err(AppError::BadRequest)?;
+    Ok((
+        StatusCode::OK,
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/markdown; charset=utf-8"),
+        )],
+        md,
+    ))
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]

@@ -13,6 +13,7 @@ fn content_type_for_path(path: &str) -> &'static str {
         "html" => "text/html; charset=utf-8",
         "js" => "application/javascript; charset=utf-8",
         "css" => "text/css; charset=utf-8",
+        "md" => "text/markdown; charset=utf-8",
         "json" => "application/json; charset=utf-8",
         "svg" => "image/svg+xml",
         "png" => "image/png",
@@ -32,6 +33,30 @@ fn resolve_asset_path(uri_path: &str) -> String {
         return format!("{trimmed}index.html");
     }
     trimmed.into()
+}
+
+/// Embedded concise rules under `web/rules/` (`RustEmbed` folder `web`).
+/// `lang`: `None` or `"en"` → English; `"zh"` → Chinese. Other values return an error message.
+pub fn rules_markdown(lang: Option<&str>) -> Result<String, String> {
+    let token = lang.unwrap_or("en").trim();
+    let path = match token.to_ascii_lowercase().as_str() {
+        "en" => "rules/rules_en.md",
+        "zh" => "rules/rules_zh.md",
+        _ => {
+            return Err(format!(
+                "invalid lang {token:?}; allowed values: en, zh (default: en)"
+            ));
+        }
+    };
+    let Some(asset) = WebAssets::get(path) else {
+        return Err(format!("missing embedded rules: {path}"));
+    };
+    String::from_utf8(asset.data.into_owned()).map_err(|e| {
+        format!(
+            "rules markdown is not utf-8: {}",
+            e.utf8_error()
+        )
+    })
 }
 
 pub async fn serve_embedded(uri: Uri) -> Response {

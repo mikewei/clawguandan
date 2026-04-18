@@ -21,6 +21,12 @@ async fn read_json(res: axum::response::Response) -> Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
+async fn read_utf8(res: axum::response::Response) -> String {
+    let body = res.into_body();
+    let bytes = body.collect().await.unwrap().to_bytes();
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
 async fn snapshot_player(app: &axum::Router, table_id: &str, pid: &str) -> Value {
     let res = app
         .clone()
@@ -321,6 +327,104 @@ async fn embedded_js_asset_is_accessible() {
         .unwrap_or("");
     assert!(
         content_type.contains("application/javascript"),
+        "unexpected content-type: {content_type}"
+    );
+}
+
+#[tokio::test]
+async fn api_rules_default_en_markdown() {
+    let app = app_with_store(TableStore::new());
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/rules")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let content_type = res
+        .headers()
+        .get("content-type")
+        .and_then(|x| x.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        content_type.contains("markdown"),
+        "unexpected content-type: {content_type}"
+    );
+    let text = read_utf8(res).await;
+    assert!(
+        text.contains("Guan Dan — concise rules"),
+        "expected English concise title in body"
+    );
+}
+
+#[tokio::test]
+async fn api_rules_lang_zh_markdown() {
+    let app = app_with_store(TableStore::new());
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/rules?lang=zh")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let text = read_utf8(res).await;
+    assert!(
+        text.contains("掼蛋 — 精简规则"),
+        "expected Chinese concise title in body"
+    );
+}
+
+#[tokio::test]
+async fn api_rules_invalid_lang_bad_request() {
+    let app = app_with_store(TableStore::new());
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/rules?lang=fr")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    let v = read_json(res).await;
+    assert_eq!(v["error"]["code"], json!("BAD_REQUEST"));
+}
+
+#[tokio::test]
+async fn embedded_rules_md_served_with_markdown_type() {
+    let app = app_with_store(TableStore::new());
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/rules/rules_en.md")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let content_type = res
+        .headers()
+        .get("content-type")
+        .and_then(|x| x.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        content_type.contains("markdown"),
         "unexpected content-type: {content_type}"
     );
 }

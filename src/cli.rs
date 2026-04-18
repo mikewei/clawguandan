@@ -16,10 +16,11 @@ use std::time::Duration;
 use url::Url;
 
 use clawguandan::domain::{
-    NextStateBody, PrivateView, TableState, apply_transition_delta_to_table_state,
+    NextStateBody, PrivateView, TableState, TableStatus, apply_transition_delta_to_table_state,
 };
 use clawguandan::game::engine::PlayerAction;
 use clawguandan::simulation::run_cli_command;
+use clawguandan::web_assets::rules_markdown;
 
 fn config_dir() -> PathBuf {
     dirs::config_dir()
@@ -379,6 +380,21 @@ pub(crate) enum Top {
         #[command(subcommand)]
         cmd: SimulateCmd,
     },
+    /// Show embedded reference material (no server required)
+    Show {
+        #[command(subcommand)]
+        cmd: ShowCmd,
+    },
+}
+
+#[derive(Subcommand)]
+pub(crate) enum ShowCmd {
+    /// Print concise Guan Dan rules (Markdown) to stdout
+    Rules {
+        /// Language code: en or zh (default: en)
+        #[arg(long, default_value = "en")]
+        lang: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -630,6 +646,17 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 players,
                 hands,
             } => simulate_cliplay_subprocess(table, rank, players, hands),
+        },
+        Top::Show { cmd } => match cmd {
+            ShowCmd::Rules { lang } => {
+                let t = lang.trim();
+                let md = rules_markdown(if t.is_empty() { None } else { Some(t) })?;
+                print!("{md}");
+                if !md.ends_with('\n') {
+                    println!();
+                }
+                Ok(())
+            }
         },
         Top::Play { cmd } => match cmd {
             PlayCmd::Ready {
@@ -1008,6 +1035,11 @@ fn cli_needs_my_action(state: &TableState, player_id: &str) -> bool {
     }
 }
 
+/// Game ended: `wait4myturn` should exit with current materialized state (no long-poll).
+fn cli_table_is_terminal(st: &TableState) -> bool {
+    matches!(st.status, TableStatus::Finished) || st.expect.kind == "game_over"
+}
+
 fn print_player_session_pretty(session: &PlayerSession) -> Result<(), String> {
     let Some(ref st) = session.table_state else {
         return Err("session has no materialized table_state".into());
@@ -1377,8 +1409,13 @@ fn play_wait4myturn(
     let s0 = read_player_session(&base, &table_id, &player_id)?
         .ok_or_else(|| "wait4myturn: missing session".to_string())?;
     if let Some(ref st) = s0.table_state {
-        if s0.last_applied_seq == st.seq && cli_needs_my_action(st, &player_id) {
-            return print_player_session_pretty(&s0);
+        if s0.last_applied_seq == st.seq {
+            if cli_needs_my_action(st, &player_id) {
+                return print_player_session_pretty(&s0);
+            }
+            if cli_table_is_terminal(st) {
+                return print_player_session_pretty(&s0);
+            }
         }
     }
 
@@ -1400,6 +1437,9 @@ fn play_wait4myturn(
                     if cli_needs_my_action(st, &player_id) {
                         return print_player_session_pretty(&s);
                     }
+                    if s.last_applied_seq == st.seq && cli_table_is_terminal(st) {
+                        return print_player_session_pretty(&s);
+                    }
                 }
             }
             s if s.is_success() => {
@@ -1409,6 +1449,9 @@ fn play_wait4myturn(
                     .ok_or_else(|| "wait4myturn: missing session".to_string())?;
                 if let Some(ref st) = s.table_state {
                     if cli_needs_my_action(st, &player_id) {
+                        return print_player_session_pretty(&s);
+                    }
+                    if s.last_applied_seq == st.seq && cli_table_is_terminal(st) {
                         return print_player_session_pretty(&s);
                     }
                 }
