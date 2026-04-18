@@ -7,6 +7,7 @@ const CLOCKWISE_SEATS = ["N", "E", "S", "W"];
 const FEED_MODE_MEDIA_QUERY = "(max-width: 640px) and (orientation: portrait)";
 const TRICK_RESET_PASS_COUNT = 3;
 const TRICK_LOOKBACK_LIMIT = 16;
+const HAND_GROUP_CHAIN_MS = 250;
 const SVG_CARDS_SPRITE_PATH = "/cards/svg-cards/svg-cards.svg";
 const SVG_CARD_VIEWBOX = "0 0 169.075 244.64";
 const CREATE_RANK_OPTIONS = new Set([
@@ -107,6 +108,62 @@ let createTableModalResolver = null;
 let layoutRenderFrameId = 0;
 let layoutSettleTimer = null;
 let lastLayoutRenderKey = "";
+/** @type {{ type: 'select'|'deselect', groupKey: string, timerId: ReturnType<typeof setTimeout> } | null} */
+let handGroupChainState = null;
+
+function handGroupKeyFromIndices(groupIndices) {
+  return [...groupIndices].sort((a, b) => a - b).join(",");
+}
+
+function clearHandGroupChainState() {
+  if (handGroupChainState?.timerId != null) {
+    clearTimeout(handGroupChainState.timerId);
+  }
+  handGroupChainState = null;
+}
+
+function armHandGroupChainTimer() {
+  if (!handGroupChainState) return;
+  if (handGroupChainState.timerId != null) {
+    clearTimeout(handGroupChainState.timerId);
+  }
+  const tid = setTimeout(() => {
+    if (handGroupChainState && handGroupChainState.timerId === tid) {
+      handGroupChainState = null;
+    }
+  }, HAND_GROUP_CHAIN_MS);
+  handGroupChainState.timerId = tid;
+}
+
+function onHandCardClick(idx, groupIndices) {
+  const gk = handGroupKeyFromIndices(groupIndices);
+
+  // Same group while chain active: every tap (each within 250ms of the last) repeats the
+  // full-group action; timer refresh keeps mobile multi-taps stable.
+  if (handGroupChainState && handGroupChainState.groupKey === gk) {
+    if (handGroupChainState.type === "select") {
+      groupIndices.forEach((i) => state.selectedHandIndexes.add(i));
+    } else {
+      groupIndices.forEach((i) => state.selectedHandIndexes.delete(i));
+    }
+    armHandGroupChainTimer();
+    syncPrivateHandSelection();
+    return;
+  }
+
+  clearHandGroupChainState();
+
+  if (state.selectedHandIndexes.has(idx)) {
+    state.selectedHandIndexes.delete(idx);
+    handGroupChainState = { type: "deselect", groupKey: gk, timerId: null };
+    armHandGroupChainTimer();
+  } else {
+    state.selectedHandIndexes.add(idx);
+    handGroupChainState = { type: "select", groupKey: gk, timerId: null };
+    armHandGroupChainTimer();
+  }
+  syncPrivateHandSelection();
+}
 
 const renderCache = {
   privateHandContentSig: null,
@@ -1190,6 +1247,7 @@ function renderHistory(history) {
 }
 
 function rebuildPrivateHand(cards, tributeGhost) {
+  clearHandGroupChainState();
   el.privateHand.innerHTML = "";
   renderCache.privateHandButtons = [];
   const rankGroups = groupContiguousHandCardsByRank(cards);
@@ -1209,6 +1267,7 @@ function rebuildPrivateHand(cards, tributeGhost) {
   rankGroups.forEach((group) => {
     const groupNode = document.createElement("div");
     groupNode.className = "card-rank-group";
+    const groupIndices = group.map(({ idx: groupIdx }) => groupIdx);
     group.forEach(({ card, idx }) => {
       const c = document.createElement("button");
       c.type = "button";
@@ -1217,12 +1276,7 @@ function rebuildPrivateHand(cards, tributeGhost) {
       c.setAttribute("aria-label", card);
       c.appendChild(renderCardFace(card));
       c.addEventListener("click", () => {
-        if (state.selectedHandIndexes.has(idx)) {
-          state.selectedHandIndexes.delete(idx);
-        } else {
-          state.selectedHandIndexes.add(idx);
-        }
-        syncPrivateHandSelection();
+        onHandCardClick(idx, groupIndices);
       });
       renderCache.privateHandButtons[idx] = c;
       groupNode.appendChild(c);
@@ -1801,6 +1855,14 @@ function render() {
 }
 
 async function init() {
+  el.privateHand.addEventListener("dblclick", (ev) => {
+    if (ev.target !== el.privateHand) return;
+    ev.preventDefault();
+    if (!state.selectedHandIndexes.size) return;
+    state.selectedHandIndexes.clear();
+    syncPrivateHandSelection();
+  });
+
   document.addEventListener("i18n:changed", () => {
     t = window.i18n && window.i18n.t ? window.i18n.t : (key) => key;
     tf = window.i18n && window.i18n.tf

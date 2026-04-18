@@ -1167,6 +1167,8 @@ button:disabled {
 
 .private-hand-area {
   margin-top: 4px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .hand-area-title {
@@ -1178,6 +1180,8 @@ button:disabled {
 #privateHand.cards {
   gap: 5px;
   align-items: flex-start;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 #privateHand .card-rank-group .card + .card {
