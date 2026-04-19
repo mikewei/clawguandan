@@ -660,6 +660,15 @@ async fn snapshot_private_visibility() {
     let snap_p = read_json(res).await;
     assert!(snap_p.get("private").is_some());
     assert_eq!(snap_p["private"]["seat"].as_str(), Some(seat));
+    let teammate = snap_p["private"]["teammateSeat"].as_str().unwrap_or("");
+    let expected_teammate = match seat {
+        "E" => "W",
+        "W" => "E",
+        "S" => "N",
+        "N" => "S",
+        _ => "",
+    };
+    assert_eq!(teammate, expected_teammate, "seat={seat}");
 }
 
 #[tokio::test]

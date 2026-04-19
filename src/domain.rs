@@ -32,6 +32,16 @@ impl Seat {
             Seat::N => "N",
         }
     }
+
+    /// Partner seat (E↔W, S↔N), aligned with `TeamPublic.seats` pairs.
+    pub fn teammate(self) -> Seat {
+        match self {
+            Seat::E => Seat::W,
+            Seat::W => Seat::E,
+            Seat::S => Seat::N,
+            Seat::N => Seat::S,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -230,6 +240,9 @@ pub struct TableState {
 pub struct PrivateView {
     pub player_id: String,
     pub seat: String,
+    /// Partner seat letter (`E`/`S`/`W`/`N`); empty string if omitted in older payloads.
+    #[serde(default)]
+    pub teammate_seat: String,
     #[serde(default)]
     pub hand_cards: Vec<String>,
     pub play_hints: PlayHints,
@@ -613,6 +626,7 @@ impl TableRuntimeState {
         Some(PrivateView {
             player_id: player_id.to_string(),
             seat: seat.as_str().to_string(),
+            teammate_seat: seat.teammate().as_str().to_string(),
             hand_cards,
             play_hints: PlayHints { can_play, can_pass },
         })
@@ -1090,6 +1104,14 @@ mod apply_delta_tests {
         ];
         sort_private_hand_cards_desc(&mut cards, HandLevel::Five);
         assert_eq!(cards, vec!["🃏b", "♥5", "♠5", "♠A"]);
+    }
+
+    #[test]
+    fn seat_teammate_pairs_ew_sn() {
+        assert_eq!(Seat::E.teammate(), Seat::W);
+        assert_eq!(Seat::W.teammate(), Seat::E);
+        assert_eq!(Seat::S.teammate(), Seat::N);
+        assert_eq!(Seat::N.teammate(), Seat::S);
     }
 }
 

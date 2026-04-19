@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::fs;
 use std::net::IpAddr;
@@ -498,7 +498,7 @@ pub(crate) enum TableCmd {
         #[arg(short = 'p', long)]
         player_id: Option<String>,
     },
-    /// Poll `nextstate` with `timeoutMs=0` until caught up; print local full materialized state.
+    /// Poll `nextstate` with `timeoutMs=0` until caught up; print materialized state (default: summary JSON).
     /// Omit `-p` for observer mode (session key `<hostPortKey>.<table_id>.observer`, same layout as players).
     Sync {
         #[arg(short = 't', long)]
@@ -507,6 +507,9 @@ pub(crate) enum TableCmd {
         player_id: Option<String>,
         #[arg(long)]
         seq: Option<u64>,
+        /// Print full table state + private (default is a fixed-key summary)
+        #[arg(long)]
+        full: bool,
     },
 }
 
@@ -522,7 +525,7 @@ pub(crate) enum PlayCmd {
         #[arg(long)]
         no_sync: bool,
     },
-    /// Long-poll until this player must act; print local full state
+    /// Long-poll until this player must act; print materialized state (default: summary JSON)
     Wait4myturn {
         #[arg(short = 't', long)]
         table_id: String,
@@ -532,6 +535,9 @@ pub(crate) enum PlayCmd {
         timeout_ms: u64,
         #[arg(long)]
         seq: Option<u64>,
+        /// Print full table state + private (default is a fixed-key summary)
+        #[arg(long)]
+        full: bool,
     },
     /// Submit tribute card
     Tribute {
@@ -637,7 +643,17 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 table_id,
                 player_id,
                 seq,
-            } => table_sync(table_id, player_id, seq, true),
+                full,
+            } => table_sync(
+                table_id,
+                player_id,
+                seq,
+                Some(if full {
+                    MaterializedPrintMode::Full
+                } else {
+                    MaterializedPrintMode::Summary
+                }),
+            ),
         },
         Top::Simulate { cmd } => match cmd {
             SimulateCmd::Cliplay {
@@ -669,7 +685,18 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 player_id,
                 timeout_ms,
                 seq,
-            } => play_wait4myturn(table_id, player_id, seq, timeout_ms),
+                full,
+            } => play_wait4myturn(
+                table_id,
+                player_id,
+                seq,
+                timeout_ms,
+                if full {
+                    MaterializedPrintMode::Full
+                } else {
+                    MaterializedPrintMode::Summary
+                },
+            ),
             PlayCmd::Tribute {
                 table_id,
                 player_id,
@@ -1040,10 +1067,127 @@ fn cli_table_is_terminal(st: &TableState) -> bool {
     matches!(st.status, TableStatus::Finished) || st.expect.kind == "game_over"
 }
 
-fn print_player_session_pretty(session: &PlayerSession) -> Result<(), String> {
-    let Some(ref st) = session.table_state else {
-        return Err("session has no materialized table_state".into());
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum MaterializedPrintMode {
+    Summary,
+    Full,
+}
+
+fn key_suffix_triggers_compact_array(key: &str) -> bool {
+    key.ends_with("cards")
+        || key.ends_with("Cards")
+        || key.ends_with("seats")
+        || key.ends_with("Seats")
+}
+
+/// Pretty JSON for stdout: normal indentation, except object keys ending in
+/// `cards`/`Cards`/`seats`/`Seats` whose value is an array are rendered with `to_string` (one line).
+fn format_json_pretty_compact_suffix_arrays(value: &Value) -> Result<String, String> {
+    let mut out = String::new();
+    fmt_value_pretty_compact(value, &mut out, 0)?;
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    Ok(out)
+}
+
+fn fmt_value_pretty_compact(v: &Value, out: &mut String, depth: usize) -> Result<(), String> {
+    let pad = |d: usize| "  ".repeat(d);
+    match v {
+        Value::Null => out.push_str("null"),
+        Value::Bool(true) => out.push_str("true"),
+        Value::Bool(false) => out.push_str("false"),
+        Value::Number(n) => out.push_str(&n.to_string()),
+        Value::String(s) => {
+            let enc = serde_json::to_string(&Value::String(s.clone())).map_err(|e| e.to_string())?;
+            out.push_str(&enc);
+        }
+        Value::Array(arr) => {
+            out.push('[');
+            if arr.is_empty() {
+                out.push(']');
+                return Ok(());
+            }
+            out.push('\n');
+            for (i, item) in arr.iter().enumerate() {
+                out.push_str(&pad(depth + 1));
+                fmt_value_pretty_compact(item, out, depth + 1)?;
+                if i + 1 < arr.len() {
+                    out.push(',');
+                }
+                out.push('\n');
+            }
+            out.push_str(&pad(depth));
+            out.push(']');
+        }
+        Value::Object(map) => {
+            out.push('{');
+            if map.is_empty() {
+                out.push('}');
+                return Ok(());
+            }
+            out.push('\n');
+            let entries: Vec<(&String, &Value)> = map.iter().collect();
+            for (i, (k, val)) in entries.iter().enumerate() {
+                out.push_str(&pad(depth + 1));
+                let key_json =
+                    serde_json::to_string(&Value::String((*k).to_string())).map_err(|e| e.to_string())?;
+                out.push_str(&key_json);
+                out.push_str(": ");
+                if key_suffix_triggers_compact_array(k) && val.is_array() {
+                    out.push_str(&serde_json::to_string(val).map_err(|e| e.to_string())?);
+                } else {
+                    fmt_value_pretty_compact(val, out, depth + 1)?;
+                }
+                if i + 1 < entries.len() {
+                    out.push(',');
+                }
+                out.push('\n');
+            }
+            out.push_str(&pad(depth));
+            out.push('}');
+        }
+    }
+    Ok(())
+}
+
+fn build_session_summary_value(session: &PlayerSession) -> Result<Value, String> {
+    let st = session
+        .table_state
+        .as_ref()
+        .ok_or_else(|| "session has no materialized table_state".to_string())?;
+
+    let hand_out = match &st.hand {
+        None => Value::Null,
+        Some(v) if v.is_null() => Value::Null,
+        Some(v) => {
+            let top = v.get("topPlay").cloned().unwrap_or(Value::Null);
+            let hand_level = v.get("handLevel").cloned().unwrap_or(Value::Null);
+            json!({ "topPlay": top, "handLevel": hand_level })
+        }
     };
+
+    let private_out = match &session.private_view {
+        None => Value::Null,
+        Some(pv) => serde_json::to_value(pv).map_err(|e| e.to_string())?,
+    };
+
+    Ok(json!({
+        "seq": st.seq,
+        "status": &st.status,
+        "phase": &st.phase,
+        "expect": &st.expect,
+        "narration": &st.narration,
+        "hand": hand_out,
+        "private": private_out,
+    }))
+}
+
+fn build_session_full_value(session: &PlayerSession) -> Result<Value, String> {
+    let st = session
+        .table_state
+        .as_ref()
+        .ok_or_else(|| "session has no materialized table_state".to_string())?;
     let mut m = serde_json::to_value(st).map_err(|e| e.to_string())?;
     if let Some(ref pv) = session.private_view {
         if let Some(obj) = m.as_object_mut() {
@@ -1053,10 +1197,15 @@ fn print_player_session_pretty(session: &PlayerSession) -> Result<(), String> {
             );
         }
     }
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&m).map_err(|e| e.to_string())?
-    );
+    Ok(m)
+}
+
+fn print_materialized_session(session: &PlayerSession, mode: MaterializedPrintMode) -> Result<(), String> {
+    let v = match mode {
+        MaterializedPrintMode::Summary => build_session_summary_value(session)?,
+        MaterializedPrintMode::Full => build_session_full_value(session)?,
+    };
+    println!("{}", format_json_pretty_compact_suffix_arrays(&v)?);
     Ok(())
 }
 
@@ -1246,7 +1395,7 @@ fn table_join(
         "{}",
         serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
     );
-    table_sync(table_id, Some(pid), None, false)
+    table_sync(table_id, Some(pid), None, None)
 }
 
 fn table_nextstate(
@@ -1307,7 +1456,7 @@ fn table_sync(
     table_id: String,
     player_id: Option<String>,
     manual_seq: Option<u64>,
-    print_materialized: bool,
+    print: Option<MaterializedPrintMode>,
 ) -> Result<(), String> {
     if manual_seq.is_some() {
         return Err("table sync does not support --seq (uses session auto-seq)".into());
@@ -1349,8 +1498,8 @@ fn table_sync(
 
             let s = read_observer_session(&base, &table_id)?
                 .ok_or_else(|| "sync: missing session".to_string())?;
-            if print_materialized {
-                print_player_session_pretty(&s)?;
+            if let Some(mode) = print {
+                print_materialized_session(&s, mode)?;
             }
             Ok(())
         }
@@ -1384,8 +1533,8 @@ fn table_sync(
 
             let s = read_player_session(&base, &table_id, pid)?
                 .ok_or_else(|| "sync: missing session".to_string())?;
-            if print_materialized {
-                print_player_session_pretty(&s)?;
+            if let Some(mode) = print {
+                print_materialized_session(&s, mode)?;
             }
             Ok(())
         }
@@ -1397,13 +1546,14 @@ fn play_wait4myturn(
     player_id: String,
     manual_seq: Option<u64>,
     timeout_ms: u64,
+    print_mode: MaterializedPrintMode,
 ) -> Result<(), String> {
     if manual_seq.is_some() {
         return Err("play wait4myturn does not support --seq (uses session auto-seq)".into());
     }
     // Catch up to server head with timeoutMs=0 nextstate loop (no long-poll at head), so the
     // local shortcut below cannot fire on a stale session while the table has moved on.
-    table_sync(table_id.clone(), Some(player_id.clone()), None, false)?;
+    table_sync(table_id.clone(), Some(player_id.clone()), None, None)?;
     let base = load_active_server_base()?;
     let client = http_client()?;
     let s0 = read_player_session(&base, &table_id, &player_id)?
@@ -1411,10 +1561,10 @@ fn play_wait4myturn(
     if let Some(ref st) = s0.table_state {
         if s0.last_applied_seq == st.seq {
             if cli_needs_my_action(st, &player_id) {
-                return print_player_session_pretty(&s0);
+                return print_materialized_session(&s0, print_mode);
             }
             if cli_table_is_terminal(st) {
-                return print_player_session_pretty(&s0);
+                return print_materialized_session(&s0, print_mode);
             }
         }
     }
@@ -1435,10 +1585,10 @@ fn play_wait4myturn(
                     .ok_or_else(|| "wait4myturn: missing session".to_string())?;
                 if let Some(ref st) = s.table_state {
                     if cli_needs_my_action(st, &player_id) {
-                        return print_player_session_pretty(&s);
+                        return print_materialized_session(&s, print_mode);
                     }
                     if s.last_applied_seq == st.seq && cli_table_is_terminal(st) {
-                        return print_player_session_pretty(&s);
+                        return print_materialized_session(&s, print_mode);
                     }
                 }
             }
@@ -1449,10 +1599,10 @@ fn play_wait4myturn(
                     .ok_or_else(|| "wait4myturn: missing session".to_string())?;
                 if let Some(ref st) = s.table_state {
                     if cli_needs_my_action(st, &player_id) {
-                        return print_player_session_pretty(&s);
+                        return print_materialized_session(&s, print_mode);
                     }
                     if s.last_applied_seq == st.seq && cli_table_is_terminal(st) {
-                        return print_player_session_pretty(&s);
+                        return print_materialized_session(&s, print_mode);
                     }
                 }
             }
@@ -1490,7 +1640,7 @@ fn play_ready(table_id: String, player_id: String, no_sync: bool) -> Result<(), 
     if no_sync {
         return Ok(());
     }
-    table_sync(table_id, Some(player_id), None, false)
+    table_sync(table_id, Some(player_id), None, None)
 }
 
 fn play_action(
@@ -1530,7 +1680,7 @@ fn play_action(
                 serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
             );
             if manual_seq.is_none() {
-                table_sync(table_id, Some(player_id), None, false)?;
+                table_sync(table_id, Some(player_id), None, None)?;
             }
             return Ok(());
         }
@@ -1544,7 +1694,7 @@ fn play_action(
             && !retried_after_stale_seq
             && code == Some("STALE_SEQ");
         if recoverable_stale_seq {
-            table_sync(table_id.clone(), Some(player_id.clone()), None, false)?;
+            table_sync(table_id.clone(), Some(player_id.clone()), None, None)?;
             retried_after_stale_seq = true;
             continue;
         }
@@ -2248,4 +2398,179 @@ fn simulate_cliplay_subprocess(
     let last_seq = read_session_last_applied_seq_observer(&base, &table_id)?.unwrap_or(0);
     println!("\n=== simulate cliplay done. table_id={table_id} observer_last_seq={last_seq} ===");
     Ok(())
+}
+
+#[cfg(test)]
+mod materialized_print_tests {
+    use super::*;
+    use clawguandan::domain::{PlayHints, PrivateView, TableState};
+
+    #[test]
+    fn summary_value_fixed_keys_and_null_private() {
+        let st: TableState = serde_json::from_value(json!({
+            "tableId": "t_x",
+            "seq": 7u64,
+            "status": "waiting",
+            "phase": "table_setup",
+            "narration": "hi",
+            "seats": {},
+            "teams": [],
+            "hand": null,
+            "expect": { "kind": "join", "actorPlayerIds": [], "legalActions": [] },
+            "scoreboard": {}
+        }))
+        .unwrap();
+        let session = PlayerSession {
+            version: 1,
+            last_applied_seq: 7,
+            table_state: Some(st),
+            private_view: None,
+        };
+        let v = build_session_summary_value(&session).unwrap();
+        let mut keys: Vec<_> = v.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        assert_eq!(
+            keys,
+            vec![
+                "expect".to_string(),
+                "hand".to_string(),
+                "narration".to_string(),
+                "phase".to_string(),
+                "private".to_string(),
+                "seq".to_string(),
+                "status".to_string(),
+            ]
+        );
+        assert_eq!(v["seq"], json!(7));
+        assert_eq!(v["private"], Value::Null);
+        assert_eq!(v["hand"], Value::Null);
+    }
+
+    #[test]
+    fn summary_hand_top_play_and_hand_level() {
+        let st: TableState = serde_json::from_value(json!({
+            "tableId": "t_x",
+            "seq": 1u64,
+            "status": "in_game",
+            "phase": "playing",
+            "narration": "",
+            "seats": {},
+            "teams": [],
+            "hand": { "topPlay": { "seat": "E" }, "handLevel": "5", "turnSeat": "N" },
+            "expect": { "kind": "play", "actorPlayerIds": ["p"], "legalActions": ["play", "pass"] },
+            "scoreboard": {}
+        }))
+        .unwrap();
+        let session = PlayerSession {
+            version: 1,
+            last_applied_seq: 1,
+            table_state: Some(st),
+            private_view: None,
+        };
+        let v = build_session_summary_value(&session).unwrap();
+        assert_eq!(
+            v["hand"],
+            json!({ "topPlay": { "seat": "E" }, "handLevel": "5" })
+        );
+    }
+
+    #[test]
+    fn summary_hand_missing_hand_level_is_null() {
+        let st: TableState = serde_json::from_value(json!({
+            "tableId": "t_x",
+            "seq": 1u64,
+            "status": "in_game",
+            "phase": "playing",
+            "narration": "",
+            "seats": {},
+            "teams": [],
+            "hand": { "topPlay": null },
+            "expect": { "kind": "play", "actorPlayerIds": ["p"], "legalActions": ["play", "pass"] },
+            "scoreboard": {}
+        }))
+        .unwrap();
+        let session = PlayerSession {
+            version: 1,
+            last_applied_seq: 1,
+            table_state: Some(st),
+            private_view: None,
+        };
+        let v = build_session_summary_value(&session).unwrap();
+        assert_eq!(v["hand"], json!({ "topPlay": null, "handLevel": null }));
+    }
+
+    #[test]
+    fn full_value_includes_table_id_and_private() {
+        let st: TableState = serde_json::from_value(json!({
+            "tableId": "t_full",
+            "seq": 2u64,
+            "status": "waiting",
+            "phase": "table_setup",
+            "narration": "",
+            "seats": {},
+            "teams": [],
+            "hand": null,
+            "expect": { "kind": "join", "actorPlayerIds": [], "legalActions": [] },
+            "scoreboard": {}
+        }))
+        .unwrap();
+        let pv = PrivateView {
+            player_id: "p1".into(),
+            seat: "E".into(),
+            teammate_seat: "W".into(),
+            hand_cards: vec!["♠3".into()],
+            play_hints: PlayHints {
+                can_play: false,
+                can_pass: false,
+            },
+        };
+        let session = PlayerSession {
+            version: 1,
+            last_applied_seq: 2,
+            table_state: Some(st),
+            private_view: Some(pv),
+        };
+        let v = build_session_full_value(&session).unwrap();
+        assert_eq!(v["tableId"], json!("t_full"));
+        assert!(v.get("private").is_some());
+        assert_eq!(v["private"]["teammateSeat"], json!("W"));
+    }
+
+    #[test]
+    fn pretty_compact_suffix_array_on_one_line() {
+        let v = json!({
+            "private": {
+                "handCards": ["♠3", "♥4"],
+                "id": "p1"
+            },
+            "teams": [
+                { "teamId": "t1", "seats": ["E", "W"] }
+            ]
+        });
+        let s = format_json_pretty_compact_suffix_arrays(&v).unwrap();
+        let hand_line = s
+            .lines()
+            .find(|ln| ln.contains("\"handCards\""))
+            .expect("handCards line");
+        assert!(
+            hand_line.contains("[\"♠3\",\"♥4\"]") || hand_line.contains("[\"♠3\", \"♥4\"]"),
+            "expected compact array on handCards line: {hand_line:?}"
+        );
+        let seats_line = s
+            .lines()
+            .find(|ln| ln.contains("\"seats\""))
+            .expect("seats line");
+        assert!(
+            seats_line.contains("[\"E\",\"W\"]") || seats_line.contains("[\"E\", \"W\"]"),
+            "expected compact array on seats line: {seats_line:?}"
+        );
+    }
+
+    #[test]
+    fn pretty_non_suffix_arrays_stay_multiline() {
+        let v = json!({ "legalActions": ["play", "pass"] });
+        let s = format_json_pretty_compact_suffix_arrays(&v).unwrap();
+        assert!(s.contains("\"play\""));
+        assert!(s.lines().filter(|ln| ln.trim() == "\"play\",").count() >= 1);
+    }
 }

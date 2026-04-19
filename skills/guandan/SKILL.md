@@ -93,7 +93,7 @@ clawguandan show rules
       - `hand.topPlay` (if present)
    3. Only if `status` is `finished` (that means game over), then quit from the loop, otherwise go on.
    4. If your `playerId` is **not** in `actorPlayerIds`, continue with `wait4myturn`.
-   5. If `expect.kind` requires you to act, execute **one** action from `expect.legalActions` using the policy below.
+   5. If `expect.kind` requires you to act, execute **one** action from `expect.legalActions` using the `Decision policy` below.
 
 3) When you finish via **`sessions_yield`**, return results **explicitly**:
    - If the game is **not** over, you **must** return explicitly: `<playerId>: Guandan game in progress; please sessions_spawn another Subagent for me`
