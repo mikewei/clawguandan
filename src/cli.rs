@@ -1904,6 +1904,14 @@ fn transition_counts_as_hand_done(v: &serde_json::Value) -> bool {
     )
 }
 
+fn table_state_is_terminal(v: &serde_json::Value) -> bool {
+    v.get("status").and_then(|x| x.as_str()) == Some("finished")
+        || v.get("expect")
+            .and_then(|e| e.get("kind"))
+            .and_then(|x| x.as_str())
+            == Some("game_over")
+}
+
 fn expect_requires_action(state: &serde_json::Value, my_pid: &str) -> bool {
     let expect = state.get("expect").unwrap_or(&serde_json::Value::Null);
     let kind = expect.get("kind").and_then(|x| x.as_str()).unwrap_or("");
@@ -2088,6 +2096,25 @@ mod tests {
         shared.on_transition_maybe_scoring(&hand_done);
         assert_eq!(shared.hands_done.load(Ordering::SeqCst), 1);
     }
+
+    #[test]
+    fn terminal_transition_sets_global_stop() {
+        let shared = CliplayShared {
+            stop: AtomicBool::new(false),
+            start_seq: 0,
+            last_scoring_transition_seq: Mutex::new(None),
+            hands_done: AtomicU32::new(0),
+            hands_target: 99,
+            err: Mutex::new(None),
+        };
+        let terminal = json!({
+            "seq": 201,
+            "type": "GAME_COMPLETED",
+            "delta": { "ops": [{ "op": "replace", "path": "/status", "value": "finished" }] }
+        });
+        shared.on_transition_maybe_terminal(&terminal);
+        assert!(shared.stop.load(Ordering::SeqCst));
+    }
 }
 
 struct CliplayShared {
@@ -2126,6 +2153,25 @@ impl CliplayShared {
         let n = self.hands_done.fetch_add(1, Ordering::SeqCst) + 1;
         println!("\n--- simulate cliplay: hand {n} completed (transition seq={tr_seq}) ---");
         if n >= self.hands_target {
+            self.stop.store(true, Ordering::SeqCst);
+        }
+    }
+
+    fn on_transition_maybe_terminal(&self, v: &serde_json::Value) {
+        let terminal_by_type =
+            v.get("type").and_then(|x| x.as_str()) == Some("GAME_COMPLETED");
+        let terminal_by_delta = v
+            .get("delta")
+            .and_then(|d| d.get("ops"))
+            .and_then(|ops| ops.as_array())
+            .map(|ops| {
+                ops.iter().any(|op| {
+                    op.get("path").and_then(|x| x.as_str()) == Some("/status")
+                        && op.get("value").and_then(|x| x.as_str()) == Some("finished")
+                })
+            })
+            .unwrap_or(false);
+        if terminal_by_type || terminal_by_delta {
             self.stop.store(true, Ordering::SeqCst);
         }
     }
@@ -2362,6 +2408,7 @@ fn simulate_cliplay_subprocess(
                 }
             };
             shared_obs.on_transition_maybe_scoring(&v);
+            shared_obs.on_transition_maybe_terminal(&v);
             if shared_obs.stop.load(Ordering::SeqCst) {
                 break;
             }
@@ -2438,15 +2485,8 @@ fn simulate_cliplay_subprocess(
                     }
                 };
 
-                if state.get("status").and_then(|x| x.as_str()) == Some("finished") {
-                    break;
-                }
-                if state
-                    .get("expect")
-                    .and_then(|e| e.get("kind"))
-                    .and_then(|x| x.as_str())
-                    == Some("game_over")
-                {
+                if table_state_is_terminal(&state) {
+                    shared.stop.store(true, Ordering::SeqCst);
                     break;
                 }
 
