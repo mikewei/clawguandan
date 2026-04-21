@@ -13,7 +13,25 @@ use clawguandan::store::TableStore;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
 use std::time::Duration;
+use std::{
+    collections::HashMap,
+    sync::{Mutex, OnceLock},
+};
 use tower::ServiceExt;
+
+static PLAYER_KEYS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+fn remember_player_key(player_id: &str, player_key: &str) {
+    let m = PLAYER_KEYS.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(mut g) = m.lock() {
+        g.insert(player_id.to_string(), player_key.to_string());
+    }
+}
+
+fn lookup_player_key(player_id: &str) -> Option<String> {
+    let m = PLAYER_KEYS.get_or_init(|| Mutex::new(HashMap::new()));
+    m.lock().ok().and_then(|g| g.get(player_id).cloned())
+}
 
 async fn read_json(res: axum::response::Response) -> Value {
     let body = res.into_body();
@@ -28,14 +46,15 @@ async fn read_utf8(res: axum::response::Response) -> String {
 }
 
 async fn snapshot_player(app: &axum::Router, table_id: &str, pid: &str) -> Value {
+    let pkey = lookup_player_key(pid).unwrap_or_default();
     let res = app
         .clone()
         .oneshot(
             Request::builder()
                 .method("GET")
                 .uri(format!(
-                    "/api/v1/tables/{}/snapshot?playerId={}",
-                    table_id, pid
+                    "/api/v1/tables/{}/snapshot?playerId={}&playerKey={}",
+                    table_id, pid, pkey
                 ))
                 .body(Body::empty())
                 .unwrap(),
@@ -124,6 +143,7 @@ async fn create_ready_table_with_store_and_rank(
     let v = read_json(res).await;
     let table_id = v["tableId"].as_str().unwrap().to_string();
     let mut pids = Vec::new();
+    let mut keys = HashMap::new();
     for i in 0..4 {
         let res = app
             .clone()
@@ -144,7 +164,13 @@ async fn create_ready_table_with_store_and_rank(
             .await
             .unwrap();
         let body = read_json(res).await;
-        pids.push(body["playerId"].as_str().unwrap().to_string());
+        let pid = body["playerId"].as_str().unwrap().to_string();
+        let pkey = body["playerKey"].as_str().unwrap().to_string();
+        keys.insert(pid.clone(), pkey);
+        pids.push(pid);
+    }
+    for (pid, pkey) in &keys {
+        remember_player_key(pid, pkey);
     }
     let mut seq = 0u64;
     for pid in &pids {
@@ -156,7 +182,12 @@ async fn create_ready_table_with_store_and_rank(
                     .uri(format!("/api/v1/tables/{}/ready", table_id))
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        json!({"playerId": pid, "ready": true}).to_string(),
+                        json!({
+                            "playerId": pid,
+                            "playerKey": keys.get(pid).unwrap(),
+                            "ready": true
+                        })
+                        .to_string(),
                     ))
                     .unwrap(),
             )

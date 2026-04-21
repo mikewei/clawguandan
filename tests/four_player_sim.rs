@@ -10,6 +10,7 @@ use clawguandan::simulation::{
 };
 use clawguandan::store::{SeatOrAuto, TableStore};
 use clawguandan::strategy::enumerate_legal_actions;
+use std::collections::HashMap;
 
 #[test]
 fn movegen_fixture_endgame_has_lead() {
@@ -106,19 +107,22 @@ async fn http_router_hand_until_scoring_smoke() {
     let table_id = t.table_id.clone();
 
     let mut pids = Vec::new();
+    let mut player_keys: HashMap<String, String> = HashMap::new();
     for _ in 0..4 {
-        let (pid, _, _, _) = store
+        let (pid, pkey, _, _, _) = store
             .join(&table_id, "p".into(), None, None, SeatOrAuto::Auto)
             .await
             .unwrap();
+        player_keys.insert(pid.clone(), pkey);
         pids.push(pid);
     }
 
     for pid in &pids {
-        store.set_ready(&table_id, pid, true).await.unwrap();
+        let pkey = player_keys.get(pid).expect("player key");
+        store.set_ready(&table_id, pid, pkey, true).await.unwrap();
     }
 
-    run_hand_until_scoring_via_router(app, &store, &table_id, 150_000)
+    run_hand_until_scoring_via_router(app, &store, &table_id, &player_keys, 150_000)
         .await
         .expect("router sim");
 

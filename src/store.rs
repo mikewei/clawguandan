@@ -144,7 +144,7 @@ impl TableStore {
         player_type: Option<PlayerType>,
         player_model: Option<String>,
         seat: SeatOrAuto,
-    ) -> Result<(String, Seat, PlayerType, Option<String>), AppError> {
+    ) -> Result<(String, String, Seat, PlayerType, Option<String>), AppError> {
         let arc = {
             let g = self.tables.lock().await;
             g.get(table_id)
@@ -165,6 +165,7 @@ impl TableStore {
         let pt = player_type.unwrap_or_default();
         let player_model = normalize_player_model(pt.clone(), player_model);
         let pid = format!("p_{}", uuid_short_fragment());
+        let pkey = uuid::Uuid::new_v4().to_string();
         let prev_snapshot = inner.state.to_table_state();
         let prev_seq = inner.state.seq;
 
@@ -172,6 +173,7 @@ impl TableStore {
             seat,
             Some(PlayerRecord {
                 player_id: pid.clone(),
+                player_key: pkey.clone(),
                 player_name,
                 player_type: pt.clone(),
                 player_model: player_model.clone(),
@@ -203,13 +205,14 @@ impl TableStore {
         });
         inner.notify.notify_waiters();
 
-        Ok((pid, seat, pt, player_model))
+        Ok((pid, pkey, seat, pt, player_model))
     }
 
     pub async fn set_ready(
         &self,
         table_id: &str,
         player_id: &str,
+        player_key: &str,
         ready: bool,
     ) -> Result<u64, AppError> {
         let arc = {
@@ -220,6 +223,7 @@ impl TableStore {
         };
 
         let mut inner = arc.lock().await;
+        Self::verify_player_identity_locked(&inner, player_id, player_key)?;
         Self::touch_player_activity_locked(&mut inner, player_id);
         Self::expire_inactive_players_locked(&mut inner)?;
 
@@ -363,10 +367,12 @@ impl TableStore {
     fn apply_action_locked(
         inner: &mut TableInner,
         player_id: &str,
+        player_key: &str,
         client_seq: u64,
         action_type: &'static str,
         event_payload: serde_json::Value,
     ) -> Result<u64, AppError> {
+        Self::verify_player_identity_locked(inner, player_id, player_key)?;
         Self::touch_player_activity_locked(inner, player_id);
         Self::expire_inactive_players_locked(inner)?;
         if client_seq != inner.state.seq {
@@ -566,6 +572,7 @@ impl TableStore {
         &self,
         table_id: &str,
         player_id: &str,
+        player_key: &str,
         client_seq: u64,
         action_type: &'static str,
         event_payload: serde_json::Value,
@@ -580,6 +587,7 @@ impl TableStore {
         Self::apply_action_locked(
             &mut inner,
             player_id,
+            player_key,
             client_seq,
             action_type,
             event_payload,
@@ -652,15 +660,13 @@ impl TableStore {
         table_id: &str,
         since_seq: u64,
         player_id: Option<&str>,
+        player_key: Option<&str>,
         timeout: Option<Duration>,
     ) -> Result<Option<NextStateBody>, AppError> {
         if let Some(pid) = player_id {
-            let snap = self.get_snapshot(table_id).await?;
-            if snap.seat_for_player(pid).is_none() {
-                return Err(AppError::BadRequest(
-                    "playerId is not seated at this table".into(),
-                ));
-            }
+            let key = player_key
+                .ok_or_else(|| AppError::BadRequest("playerKey is required with playerId".into()))?;
+            self.verify_player_identity(table_id, pid, key).await?;
             self.touch_player_activity(table_id, pid).await?;
         }
         let body = self.next_state(table_id, since_seq, timeout).await?;
@@ -706,6 +712,23 @@ impl TableStore {
         Ok(())
     }
 
+    pub async fn verify_player_identity(
+        &self,
+        table_id: &str,
+        player_id: &str,
+        player_key: &str,
+    ) -> Result<(), AppError> {
+        let arc = {
+            let g = self.tables.lock().await;
+            g.get(table_id)
+                .cloned()
+                .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))?
+        };
+        let mut inner = arc.lock().await;
+        Self::expire_inactive_players_locked(&mut inner)?;
+        Self::verify_player_identity_locked(&inner, player_id, player_key)
+    }
+
     fn touch_player_activity_locked(inner: &mut TableInner, player_id: &str) -> bool {
         let now = std::time::Instant::now();
         for slot in inner.state.seats.values_mut() {
@@ -717,6 +740,27 @@ impl TableStore {
             }
         }
         false
+    }
+
+    fn verify_player_identity_locked(
+        inner: &TableInner,
+        player_id: &str,
+        player_key: &str,
+    ) -> Result<(), AppError> {
+        let Some(seat) = inner.state.seat_for_player(player_id) else {
+            return Err(AppError::Forbidden(
+                "playerId is not seated at this table".into(),
+            ));
+        };
+        let Some(player) = inner.state.seats.get(&seat).and_then(|p| p.as_ref()) else {
+            return Err(AppError::Forbidden(
+                "playerId is not seated at this table".into(),
+            ));
+        };
+        if player.player_key != player_key {
+            return Err(AppError::Forbidden("invalid playerKey for playerId".into()));
+        }
+        Ok(())
     }
 
     fn expire_inactive_players_locked(inner: &mut TableInner) -> Result<(), AppError> {

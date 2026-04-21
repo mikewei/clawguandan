@@ -6,6 +6,7 @@ use clawguandan::api::app_with_store;
 use clawguandan::store::TableStore;
 use http_body_util::BodyExt;
 use serde_json::json;
+use std::collections::HashMap;
 use tower::ServiceExt;
 
 async fn read_json(res: axum::response::Response) -> serde_json::Value {
@@ -14,7 +15,9 @@ async fn read_json(res: axum::response::Response) -> serde_json::Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
-async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<String>, u64) {
+async fn create_ready_table(
+    app: axum::Router,
+) -> (axum::Router, String, Vec<String>, HashMap<String, String>, u64) {
     let res = app
         .clone()
         .oneshot(
@@ -30,6 +33,7 @@ async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<Str
     let v = read_json(res).await;
     let table_id = v["tableId"].as_str().unwrap().to_string();
     let mut pids = Vec::new();
+    let mut keys = HashMap::new();
     for i in 0..4 {
         let res = app
             .clone()
@@ -50,7 +54,10 @@ async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<Str
             .await
             .unwrap();
         let body = read_json(res).await;
-        pids.push(body["playerId"].as_str().unwrap().to_string());
+        let pid = body["playerId"].as_str().unwrap().to_string();
+        let pkey = body["playerKey"].as_str().unwrap().to_string();
+        keys.insert(pid.clone(), pkey);
+        pids.push(pid);
     }
     let mut seq = 0u64;
     for pid in &pids {
@@ -62,7 +69,12 @@ async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<Str
                     .uri(format!("/api/v1/tables/{}/ready", table_id))
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        json!({"playerId": pid, "ready": true}).to_string(),
+                        json!({
+                            "playerId": pid,
+                            "playerKey": keys.get(pid).unwrap(),
+                            "ready": true
+                        })
+                        .to_string(),
                     ))
                     .unwrap(),
             )
@@ -71,13 +83,13 @@ async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<Str
         let body = read_json(res).await;
         seq = body["newSeq"].as_u64().unwrap();
     }
-    (app, table_id, pids, seq)
+    (app, table_id, pids, keys, seq)
 }
 
 #[tokio::test]
 async fn unprocessable_includes_code_and_current_seq() {
     let app = app_with_store(TableStore::new());
-    let (app, table_id, pids, seq) = create_ready_table(app).await;
+    let (app, table_id, pids, keys, seq) = create_ready_table(app).await;
 
     let res = app
         .oneshot(
@@ -86,7 +98,12 @@ async fn unprocessable_includes_code_and_current_seq() {
                 .uri(format!("/api/v1/tables/{}/actions/pass", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"playerId": &pids[1], "seq": seq}).to_string(),
+                        json!({
+                            "playerId": &pids[1],
+                            "playerKey": keys.get(&pids[1]).unwrap(),
+                            "seq": seq
+                        })
+                        .to_string(),
                 ))
                 .unwrap(),
         )
@@ -101,7 +118,7 @@ async fn unprocessable_includes_code_and_current_seq() {
 #[tokio::test]
 async fn illegal_play_includes_illegal_action_or_similar() {
     let app = app_with_store(TableStore::new());
-    let (app, table_id, pids, seq) = create_ready_table(app).await;
+    let (app, table_id, pids, keys, seq) = create_ready_table(app).await;
 
     let res = app
         .oneshot(
@@ -112,6 +129,7 @@ async fn illegal_play_includes_illegal_action_or_similar() {
                 .body(Body::from(
                     json!({
                         "playerId": &pids[0],
+                        "playerKey": keys.get(&pids[0]).unwrap(),
                         "seq": seq,
                         "cards": ["♠A", "♥K"]
                     })
@@ -130,7 +148,7 @@ async fn illegal_play_includes_illegal_action_or_similar() {
 #[tokio::test]
 async fn conflict_stale_seq_shape() {
     let app = app_with_store(TableStore::new());
-    let (app, table_id, pids, seq) = create_ready_table(app).await;
+    let (app, table_id, pids, keys, seq) = create_ready_table(app).await;
 
     let res = app
         .oneshot(
@@ -139,7 +157,12 @@ async fn conflict_stale_seq_shape() {
                 .uri(format!("/api/v1/tables/{}/actions/pass", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"playerId": &pids[0], "seq": seq - 1}).to_string(),
+                        json!({
+                            "playerId": &pids[0],
+                            "playerKey": keys.get(&pids[0]).unwrap(),
+                            "seq": seq - 1
+                        })
+                        .to_string(),
                 ))
                 .unwrap(),
         )
@@ -154,7 +177,7 @@ async fn conflict_stale_seq_shape() {
 #[tokio::test]
 async fn forbidden_non_seated_shape() {
     let app = app_with_store(TableStore::new());
-    let (app, table_id, _pids, seq) = create_ready_table(app).await;
+    let (app, table_id, _pids, _keys, seq) = create_ready_table(app).await;
 
     let res = app
         .oneshot(
@@ -163,7 +186,12 @@ async fn forbidden_non_seated_shape() {
                 .uri(format!("/api/v1/tables/{}/actions/pass", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"playerId": "p_not_here", "seq": seq}).to_string(),
+                        json!({
+                            "playerId": "p_not_here",
+                            "playerKey": "wrong-key",
+                            "seq": seq
+                        })
+                        .to_string(),
                 ))
                 .unwrap(),
         )

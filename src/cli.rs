@@ -66,6 +66,24 @@ impl Default for PlayerSession {
     }
 }
 
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(default)]
+struct AuthSession {
+    version: u32,
+    player_id: String,
+    player_key: String,
+}
+
+impl Default for AuthSession {
+    fn default() -> Self {
+        Self {
+            version: 1,
+            player_id: String::new(),
+            player_key: String::new(),
+        }
+    }
+}
+
 /// API shape of `GET .../snapshot` for deserialization.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -112,6 +130,10 @@ fn validate_session_id_component(s: &str, name: &str) -> Result<(), String> {
 
 fn session_json_path(session_key: &str) -> PathBuf {
     session_state_root().join(session_key).join("session.json")
+}
+
+fn auth_json_path(session_key: &str) -> PathBuf {
+    session_state_root().join(session_key).join("auth.json")
 }
 
 /// Write `session.json` via temp file + rename (best-effort atomic replace).
@@ -219,6 +241,58 @@ fn read_session_last_applied_seq(
     player_id: &str,
 ) -> Result<Option<u64>, String> {
     Ok(read_player_session(base, table_id, player_id)?.map(|s| s.last_applied_seq))
+}
+
+fn read_auth_session(base: &str, table_id: &str, player_id: &str) -> Result<Option<AuthSession>, String> {
+    let sid = session_host_port_key_from_base(base)?;
+    validate_session_id_component(table_id, "table_id")?;
+    validate_session_id_component(player_id, "player_id")?;
+    let session_key = seq_key(&sid, table_id, player_id);
+    let path = auth_json_path(&session_key);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let auth: AuthSession = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    Ok(Some(auth))
+}
+
+fn write_auth_session(base: &str, table_id: &str, auth: &AuthSession) -> Result<(), String> {
+    let sid = session_host_port_key_from_base(base)?;
+    validate_session_id_component(table_id, "table_id")?;
+    validate_session_id_component(&auth.player_id, "player_id")?;
+    let session_key = seq_key(&sid, table_id, &auth.player_id);
+    let path = auth_json_path(&session_key);
+    let s = serde_json::to_string_pretty(auth).map_err(|e| e.to_string())?;
+    write_session_state_atomic(&path, &s)
+}
+
+fn resolve_player_key(
+    base: &str,
+    table_id: &str,
+    player_id: &str,
+    explicit_player_key: Option<&str>,
+) -> Result<String, String> {
+    if let Some(k) = explicit_player_key {
+        let trimmed = k.trim();
+        if trimmed.is_empty() {
+            return Err("playerKey cannot be empty".into());
+        }
+        return Ok(trimmed.to_string());
+    }
+    let auth = read_auth_session(base, table_id, player_id)?.ok_or_else(|| {
+        "missing playerKey for this player; run `table join` again or pass `--player-key`".to_string()
+    })?;
+    if auth.player_id != player_id {
+        return Err(format!(
+            "auth playerId mismatch: expected {}, got {}",
+            player_id, auth.player_id
+        ));
+    }
+    if auth.player_key.trim().is_empty() {
+        return Err("stored playerKey is empty; re-join or pass `--player-key`".into());
+    }
+    Ok(auth.player_key)
 }
 
 impl CliConfig {
@@ -486,6 +560,8 @@ pub(crate) enum TableCmd {
         table_id: String,
         #[arg(short = 'p', long)]
         player_id: Option<String>,
+        #[arg(short = 'k', long)]
+        player_key: Option<String>,
         #[arg(long)]
         seq: Option<u64>,
         #[arg(long, default_value_t = 60000)]
@@ -497,6 +573,8 @@ pub(crate) enum TableCmd {
         table_id: String,
         #[arg(short = 'p', long)]
         player_id: Option<String>,
+        #[arg(short = 'k', long)]
+        player_key: Option<String>,
     },
     /// Poll `nextstate` with `timeoutMs=0` until caught up; print materialized state (default: summary JSON).
     /// Omit `-p` for observer mode (session key `<hostPortKey>.<table_id>.observer`, same layout as players).
@@ -505,6 +583,8 @@ pub(crate) enum TableCmd {
         table_id: String,
         #[arg(short = 'p', long)]
         player_id: Option<String>,
+        #[arg(short = 'k', long)]
+        player_key: Option<String>,
         #[arg(long)]
         seq: Option<u64>,
         /// Print full table state + private (default is a fixed-key summary)
@@ -521,6 +601,8 @@ pub(crate) enum PlayCmd {
         table_id: String,
         #[arg(short = 'p', long)]
         player_id: String,
+        #[arg(short = 'k', long)]
+        player_key: Option<String>,
         /// Skip `table sync` after ready (default: sync updates session; stdout is ready API JSON only)
         #[arg(long)]
         no_sync: bool,
@@ -531,6 +613,8 @@ pub(crate) enum PlayCmd {
         table_id: String,
         #[arg(short = 'p', long)]
         player_id: String,
+        #[arg(short = 'k', long)]
+        player_key: Option<String>,
         #[arg(long, default_value_t = 60000)]
         timeout_ms: u64,
         #[arg(long)]
@@ -545,6 +629,8 @@ pub(crate) enum PlayCmd {
         table_id: String,
         #[arg(short = 'p', long)]
         player_id: String,
+        #[arg(short = 'k', long)]
+        player_key: Option<String>,
         #[arg(long)]
         seq: Option<u64>,
         card: String,
@@ -555,6 +641,8 @@ pub(crate) enum PlayCmd {
         table_id: String,
         #[arg(short = 'p', long)]
         player_id: String,
+        #[arg(short = 'k', long)]
+        player_key: Option<String>,
         #[arg(long)]
         seq: Option<u64>,
         card: String,
@@ -565,6 +653,8 @@ pub(crate) enum PlayCmd {
         table_id: String,
         #[arg(short = 'p', long)]
         player_id: String,
+        #[arg(short = 'k', long)]
+        player_key: Option<String>,
         #[arg(long)]
         seq: Option<u64>,
         cards: String,
@@ -578,6 +668,8 @@ pub(crate) enum PlayCmd {
         table_id: String,
         #[arg(short = 'p', long)]
         player_id: String,
+        #[arg(short = 'k', long)]
+        player_key: Option<String>,
         /// Omit for auto-seq from player session (`lastAppliedSeq`)
         #[arg(long)]
         seq: Option<u64>,
@@ -588,6 +680,8 @@ pub(crate) enum PlayCmd {
         table_id: String,
         #[arg(short = 'p', long)]
         player_id: String,
+        #[arg(short = 'k', long)]
+        player_key: Option<String>,
         #[arg(long)]
         seq: Option<u64>,
     },
@@ -597,6 +691,8 @@ pub(crate) enum PlayCmd {
         table_id: String,
         #[arg(short = 'p', long)]
         player_id: String,
+        #[arg(short = 'k', long)]
+        player_key: Option<String>,
         #[arg(long)]
         seq: Option<u64>,
     },
@@ -632,21 +728,25 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
             TableCmd::Nextstate {
                 table_id,
                 player_id,
+                player_key,
                 seq,
                 timeout_ms,
-            } => table_nextstate(table_id, player_id, seq, timeout_ms),
+            } => table_nextstate(table_id, player_id, player_key, seq, timeout_ms),
             TableCmd::Snapshot {
                 table_id,
                 player_id,
-            } => table_snapshot(table_id, player_id),
+                player_key,
+            } => table_snapshot(table_id, player_id, player_key),
             TableCmd::Sync {
                 table_id,
                 player_id,
+                player_key,
                 seq,
                 full,
             } => table_sync(
                 table_id,
                 player_id,
+                player_key,
                 seq,
                 Some(if full {
                     MaterializedPrintMode::Full
@@ -678,17 +778,20 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
             PlayCmd::Ready {
                 table_id,
                 player_id,
+                player_key,
                 no_sync,
-            } => play_ready(table_id, player_id, no_sync),
+            } => play_ready(table_id, player_id, player_key, no_sync),
             PlayCmd::Wait4myturn {
                 table_id,
                 player_id,
+                player_key,
                 timeout_ms,
                 seq,
                 full,
             } => play_wait4myturn(
                 table_id,
                 player_id,
+                player_key,
                 seq,
                 timeout_ms,
                 if full {
@@ -700,17 +803,27 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
             PlayCmd::Tribute {
                 table_id,
                 player_id,
-                seq,
-                card,
-            } => play_action(table_id, player_id, seq, "tribute", json!({ "card": card })),
-            PlayCmd::Returncard {
-                table_id,
-                player_id,
+                player_key,
                 seq,
                 card,
             } => play_action(
                 table_id,
                 player_id,
+                player_key,
+                seq,
+                "tribute",
+                json!({ "card": card }),
+            ),
+            PlayCmd::Returncard {
+                table_id,
+                player_id,
+                player_key,
+                seq,
+                card,
+            } => play_action(
+                table_id,
+                player_id,
+                player_key,
                 seq,
                 "return_card",
                 json!({ "card": card }),
@@ -718,6 +831,7 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
             PlayCmd::Playcards {
                 table_id,
                 player_id,
+                player_key,
                 seq,
                 cards,
                 wild_targets,
@@ -738,18 +852,20 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                         body["declaredWildMapping"] = json!({ "wildTargets": targets });
                     }
                 }
-                play_action(table_id, player_id, seq, "play", body)
+                play_action(table_id, player_id, player_key, seq, "play", body)
             }
             PlayCmd::Suggest {
                 table_id,
                 player_id,
+                player_key,
                 seq,
-            } => play_suggest(table_id, player_id, seq.as_ref().copied()),
+            } => play_suggest(table_id, player_id, player_key, seq.as_ref().copied()),
             PlayCmd::Pass {
                 table_id,
                 player_id,
+                player_key,
                 seq,
-            } => play_action(table_id, player_id, seq, "pass", json!({})),
+            } => play_action(table_id, player_id, player_key, seq, "pass", json!({})),
             PlayCmd::NextHand { .. } => {
                 return Err("next_hand CLI command has been removed; hands now advance automatically after scoring".into());
             }
@@ -1022,7 +1138,11 @@ fn parse_player_type(s: Option<String>) -> Result<Option<String>, String> {
     })
 }
 
-fn table_snapshot(table_id: String, player_id: Option<String>) -> Result<(), String> {
+fn table_snapshot(
+    table_id: String,
+    player_id: Option<String>,
+    player_key: Option<String>,
+) -> Result<(), String> {
     let base = load_active_server_base()?;
     let client = http_client()?;
     let mut u = Url::parse(&format!(
@@ -1032,7 +1152,9 @@ fn table_snapshot(table_id: String, player_id: Option<String>) -> Result<(), Str
     ))
     .map_err(|e| e.to_string())?;
     if let Some(pid) = &player_id {
+        let pkey = resolve_player_key(&base, &table_id, pid, player_key.as_deref())?;
         u.query_pairs_mut().append_pair("playerId", pid);
+        u.query_pairs_mut().append_pair("playerKey", &pkey);
     }
     let r = client.get(u).send().map_err(|e| e.to_string())?;
     let status = r.status();
@@ -1214,6 +1336,7 @@ fn http_get_snapshot_parsed(
     client: &Client,
     table_id: &str,
     player_id: Option<&str>,
+    player_key: Option<&str>,
 ) -> Result<SnapshotApiBody, String> {
     let mut u = Url::parse(&format!(
         "{}/api/v1/tables/{}/snapshot",
@@ -1223,6 +1346,9 @@ fn http_get_snapshot_parsed(
     .map_err(|e| e.to_string())?;
     if let Some(pid) = player_id {
         u.query_pairs_mut().append_pair("playerId", pid);
+        let pkey = player_key
+            .ok_or_else(|| "playerKey is required when playerId is set".to_string())?;
+        u.query_pairs_mut().append_pair("playerKey", pkey);
     }
     let r = client.get(u).send().map_err(|e| e.to_string())?;
     let status = r.status();
@@ -1240,10 +1366,11 @@ fn ensure_session_bootstrap(
     client: &Client,
     table_id: &str,
     player_id: &str,
+    player_key: &str,
 ) -> Result<PlayerSession, String> {
     let mut s = read_player_session(base, table_id, player_id)?.unwrap_or_default();
     if s.table_state.is_none() {
-        let snap = http_get_snapshot_parsed(base, client, table_id, Some(player_id))?;
+        let snap = http_get_snapshot_parsed(base, client, table_id, Some(player_id), Some(player_key))?;
         s.table_state = Some(snap.state);
         s.private_view = snap.private;
         s.last_applied_seq = s.table_state.as_ref().map(|t| t.seq).unwrap_or(0);
@@ -1257,9 +1384,10 @@ fn merge_nextstate_into_session(
     client: &Client,
     table_id: &str,
     player_id: &str,
+    player_key: &str,
     body: &NextStateBody,
 ) -> Result<(), String> {
-    let mut s = ensure_session_bootstrap(base, client, table_id, player_id)?;
+    let mut s = ensure_session_bootstrap(base, client, table_id, player_id, player_key)?;
     let ts = s
         .table_state
         .as_mut()
@@ -1280,7 +1408,7 @@ fn ensure_session_bootstrap_observer(
 ) -> Result<PlayerSession, String> {
     let mut s = read_observer_session(base, table_id)?.unwrap_or_default();
     if s.table_state.is_none() {
-        let snap = http_get_snapshot_parsed(base, client, table_id, None)?;
+        let snap = http_get_snapshot_parsed(base, client, table_id, None, None)?;
         s.table_state = Some(snap.state);
         s.private_view = None;
         s.last_applied_seq = s.table_state.as_ref().map(|t| t.seq).unwrap_or(0);
@@ -1312,10 +1440,12 @@ fn merge_nextstate_into_observer_session(
 fn play_suggest(
     table_id: String,
     player_id: String,
+    player_key: Option<String>,
     manual_seq: Option<u64>,
 ) -> Result<(), String> {
     let base = load_active_server_base()?;
     let client = http_client()?;
+    let pkey = resolve_player_key(&base, &table_id, &player_id, player_key.as_deref())?;
     let seq = if let Some(s) = manual_seq {
         s
     } else {
@@ -1333,7 +1463,8 @@ fn play_suggest(
     .map_err(|e| e.to_string())?;
     u.query_pairs_mut()
         .append_pair("seq", &seq.to_string())
-        .append_pair("playerId", &player_id);
+        .append_pair("playerId", &player_id)
+        .append_pair("playerKey", &pkey);
     let r = client.get(u.as_str()).send().map_err(|e| e.to_string())?;
     let status = r.status();
     if !status.is_success() {
@@ -1380,6 +1511,23 @@ fn table_join(
         return Err(format!("join failed: {}", r.status()));
     }
     let v: serde_json::Value = r.json().map_err(|e| e.to_string())?;
+    let pid = v["playerId"]
+        .as_str()
+        .ok_or_else(|| "join: missing playerId".to_string())?
+        .to_string();
+    let pkey = v["playerKey"]
+        .as_str()
+        .ok_or_else(|| "join: missing playerKey".to_string())?
+        .to_string();
+    write_auth_session(
+        &base,
+        &table_id,
+        &AuthSession {
+            version: 1,
+            player_id: pid.clone(),
+            player_key: pkey.clone(),
+        },
+    )?;
     if no_sync {
         println!(
             "{}",
@@ -1387,20 +1535,17 @@ fn table_join(
         );
         return Ok(());
     }
-    let pid = v["playerId"]
-        .as_str()
-        .ok_or_else(|| "join: missing playerId".to_string())?
-        .to_string();
     println!(
         "{}",
         serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
     );
-    table_sync(table_id, Some(pid), None, None)
+    table_sync(table_id, Some(pid), Some(pkey), None, None)
 }
 
 fn table_nextstate(
     table_id: String,
     player_id: Option<String>,
+    player_key: Option<String>,
     manual_seq: Option<u64>,
     timeout_ms: u64,
 ) -> Result<(), String> {
@@ -1422,7 +1567,9 @@ fn table_nextstate(
         .append_pair("sinceSeq", &since_seq.to_string())
         .append_pair("timeoutMs", &timeout_ms.to_string());
     if let Some(pid) = &player_id {
+        let pkey = resolve_player_key(&base, &table_id, pid, player_key.as_deref())?;
         u.query_pairs_mut().append_pair("playerId", pid);
+        u.query_pairs_mut().append_pair("playerKey", &pkey);
     }
 
     let r = client.get(u).send().map_err(|e| e.to_string())?;
@@ -1442,7 +1589,8 @@ fn table_nextstate(
             if let Some(pid) = &player_id
                 && manual_seq.is_none()
             {
-                merge_nextstate_into_session(&base, &client, &table_id, pid, &body)?;
+                let pkey = resolve_player_key(&base, &table_id, pid, player_key.as_deref())?;
+                merge_nextstate_into_session(&base, &client, &table_id, pid, &pkey, &body)?;
             } else if player_id.is_none() && manual_seq.is_none() {
                 merge_nextstate_into_observer_session(&base, &client, &table_id, &body)?;
             }
@@ -1455,6 +1603,7 @@ fn table_nextstate(
 fn table_sync(
     table_id: String,
     player_id: Option<String>,
+    player_key: Option<String>,
     manual_seq: Option<u64>,
     print: Option<MaterializedPrintMode>,
 ) -> Result<(), String> {
@@ -1504,7 +1653,8 @@ fn table_sync(
             Ok(())
         }
         Some(pid) => {
-            ensure_session_bootstrap(&base, &client, &table_id, pid)?;
+            let pkey = resolve_player_key(&base, &table_id, pid, player_key.as_deref())?;
+            ensure_session_bootstrap(&base, &client, &table_id, pid, &pkey)?;
             loop {
                 let since_seq = read_session_last_applied_seq(&base, &table_id, pid)?.unwrap_or(0);
                 let mut u =
@@ -1514,6 +1664,7 @@ fn table_sync(
                     .append_pair("sinceSeq", &since_seq.to_string())
                     .append_pair("timeoutMs", &NEXTSTATE_TIMEOUT_MS.to_string());
                 u.query_pairs_mut().append_pair("playerId", pid);
+                u.query_pairs_mut().append_pair("playerKey", &pkey);
 
                 let r = client.get(u).send().map_err(|e| e.to_string())?;
                 match r.status() {
@@ -1522,7 +1673,7 @@ fn table_sync(
                     }
                     s if s.is_success() => {
                         let body: NextStateBody = r.json().map_err(|e| e.to_string())?;
-                        merge_nextstate_into_session(&base, &client, &table_id, pid, &body)?;
+                        merge_nextstate_into_session(&base, &client, &table_id, pid, &pkey, &body)?;
                         if body.lag == 0 {
                             break;
                         }
@@ -1544,6 +1695,7 @@ fn table_sync(
 fn play_wait4myturn(
     table_id: String,
     player_id: String,
+    player_key: Option<String>,
     manual_seq: Option<u64>,
     timeout_ms: u64,
     print_mode: MaterializedPrintMode,
@@ -1553,9 +1705,16 @@ fn play_wait4myturn(
     }
     // Catch up to server head with timeoutMs=0 nextstate loop (no long-poll at head), so the
     // local shortcut below cannot fire on a stale session while the table has moved on.
-    table_sync(table_id.clone(), Some(player_id.clone()), None, None)?;
+    table_sync(
+        table_id.clone(),
+        Some(player_id.clone()),
+        player_key.clone(),
+        None,
+        None,
+    )?;
     let base = load_active_server_base()?;
     let client = http_client()?;
+    let pkey = resolve_player_key(&base, &table_id, &player_id, player_key.as_deref())?;
     let s0 = read_player_session(&base, &table_id, &player_id)?
         .ok_or_else(|| "wait4myturn: missing session".to_string())?;
     if let Some(ref st) = s0.table_state {
@@ -1577,6 +1736,7 @@ fn play_wait4myturn(
             .append_pair("sinceSeq", &since_seq.to_string())
             .append_pair("timeoutMs", &timeout_ms.to_string());
         u.query_pairs_mut().append_pair("playerId", &player_id);
+        u.query_pairs_mut().append_pair("playerKey", &pkey);
 
         let r = client.get(u).send().map_err(|e| e.to_string())?;
         match r.status() {
@@ -1594,7 +1754,7 @@ fn play_wait4myturn(
             }
             s if s.is_success() => {
                 let body: NextStateBody = r.json().map_err(|e| e.to_string())?;
-                merge_nextstate_into_session(&base, &client, &table_id, &player_id, &body)?;
+                merge_nextstate_into_session(&base, &client, &table_id, &player_id, &pkey, &body)?;
                 let s = read_player_session(&base, &table_id, &player_id)?
                     .ok_or_else(|| "wait4myturn: missing session".to_string())?;
                 if let Some(ref st) = s.table_state {
@@ -1611,12 +1771,19 @@ fn play_wait4myturn(
     }
 }
 
-fn play_ready(table_id: String, player_id: String, no_sync: bool) -> Result<(), String> {
+fn play_ready(
+    table_id: String,
+    player_id: String,
+    player_key: Option<String>,
+    no_sync: bool,
+) -> Result<(), String> {
     let base = load_active_server_base()?;
     let client = http_client()?;
+    let pkey = resolve_player_key(&base, &table_id, &player_id, player_key.as_deref())?;
 
     let body = json!({
         "playerId": player_id,
+        "playerKey": pkey,
         "ready": true,
     });
     let r = client
@@ -1640,18 +1807,20 @@ fn play_ready(table_id: String, player_id: String, no_sync: bool) -> Result<(), 
     if no_sync {
         return Ok(());
     }
-    table_sync(table_id, Some(player_id), None, None)
+    table_sync(table_id, Some(player_id), player_key, None, None)
 }
 
 fn play_action(
     table_id: String,
     player_id: String,
+    player_key: Option<String>,
     manual_seq: Option<u64>,
     action: &str,
     mut payload: serde_json::Value,
 ) -> Result<(), String> {
     let base = load_active_server_base()?;
     let client = http_client()?;
+    let pkey = resolve_player_key(&base, &table_id, &player_id, player_key.as_deref())?;
     let mut retried_after_stale_seq = false;
     loop {
         let seq = if let Some(s) = manual_seq {
@@ -1663,6 +1832,7 @@ fn play_action(
                 })?
         };
         payload["playerId"] = json!(&player_id);
+        payload["playerKey"] = json!(&pkey);
         payload["seq"] = json!(seq);
         let r = client
             .post(format!(
@@ -1680,7 +1850,13 @@ fn play_action(
                 serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
             );
             if manual_seq.is_none() {
-                table_sync(table_id, Some(player_id), None, None)?;
+                table_sync(
+                    table_id,
+                    Some(player_id),
+                    Some(pkey.clone()),
+                    None,
+                    None,
+                )?;
             }
             return Ok(());
         }
@@ -1694,7 +1870,13 @@ fn play_action(
             && !retried_after_stale_seq
             && code == Some("STALE_SEQ");
         if recoverable_stale_seq {
-            table_sync(table_id.clone(), Some(player_id.clone()), None, None)?;
+            table_sync(
+                table_id.clone(),
+                Some(player_id.clone()),
+                Some(pkey.clone()),
+                None,
+                None,
+            )?;
             retried_after_stale_seq = true;
             continue;
         }

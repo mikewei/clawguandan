@@ -342,6 +342,7 @@ This is the main way clients stay in sync and learn what to do next.
   - Query parameters (minimum):
     - `sinceSeq` (integer): client’s last applied sequence (use `0` before any transition is applied).
     - `playerId` (optional string): identifies the subscriber for per-player fields (`private`, personalized `prompt`, and action expectation).
+    - `playerKey` (optional string): required when `playerId` is present; used for player identity validation.
       - When omitted, the caller is treated as an observer and receives public transitions only.
     - `timeoutMs` (optional): server waits up to this long for `seq` to advance past `sinceSeq`; on timeout, return `204 No Content` (see headers below).
   - Behavior:
@@ -389,6 +390,7 @@ Optional convenience:
 - `GET /tables/{tableId}/snapshot`
   - **No query parameters:** returns the latest public `TableState` (flattened JSON with `seq`, `tableId`, `seats`, `expect`, etc.).
   - `playerId` (optional): adds a `private` object (hand cards, hints) for that seated player.
+  - `playerKey` (optional): required when `playerId` is present.
   - `atSeq` (optional): in the current MVP, only the latest snapshot is supported; if `atSeq` is present and not equal to the current head `seq`, the server returns `400 Bad Request`.
   - Clients that apply `nextstate` deltas locally SHOULD call this once when they have no materialized `TableState` yet (first merge), because the first transition’s patch is not applicable to an empty document.
 
@@ -401,11 +403,11 @@ Optional convenience:
   - Body: `{ "playerType": "human|ai|unknown", "playerName": "...", "seat": "E|S|W|N|auto" }`
   - `playerType` is optional; when omitted, the server defaults it to `unknown`.
   - Response includes server-issued player identity and current head, for example:
-    - `{ "playerId": "...", "seat": "S", "playerType": "ai", "newSeq": 1 }`
+    - `{ "playerId": "...", "playerKey": "<uuid>", "seat": "S", "playerType": "ai", "newSeq": 1 }`
   - On success: advances `seq`, append transition.
 - `POST /tables/{tableId}/ready`
-  - Body: `{ "playerId", "ready": true|false }` (no `seq`; the server applies against the current head).
-  - Constraint: only a `playerId` that is currently seated at this table can call this endpoint.
+  - Body: `{ "playerId", "playerKey", "ready": true|false }` (no `seq`; the server applies against the current head).
+  - Constraint: only a `playerId + playerKey` pair that matches an active seated player can call this endpoint.
   - **Idempotent:** if `ready` is already the requested value for that player, the server does not advance `seq` or append a transition; response is still `200` with `newSeq` equal to the current head.
   - When all 4 seated players become `ready=true`, the server automatically starts the first hand and emits the corresponding state transitions.
 
@@ -414,7 +416,8 @@ Optional convenience:
 All action endpoints:
 
 - Accept `playerId` and `seq` (last known/current head).
-- Constraint: only seated players can call action endpoints; observers are read-only and cannot mutate game state.
+- Accept `playerKey` together with `playerId` for identity validation.
+- Constraint: only seated players with valid `playerId + playerKey` can call action endpoints; observers are read-only and cannot mutate game state.
 - On success: response includes `newSeq` (equals previous `seq + 1`) and a minimal echo of applied action.
 - Map game phases to concrete routes (names are indicative; keep them stable for agents):
 
@@ -441,11 +444,11 @@ Rejected action contract:
 
 High-level flow:
 
-1. **Create or join** a table; remember `tableId` and your `playerId`:
+1. **Create or join** a table; remember `tableId`, `playerId`, and `playerKey`:
    - Point the CLI at a server: `clawguandan server use <hostOrIp[:port]>` or `clawguandan server new`.
    - **Create:** `clawguandan table create [<tableName>]` ; The command prints JSON; read and store `tableId`.
    - **Join:** `clawguandan table join -t <tableId> --name "<playerName>" --type ai [--seat E|S|W|N|auto]`.
-2. **Ready:** `clawguandan play ready -t <tableId> -p <playerId>` ; When all four seated players are ready, the server starts the first hand automatically.
+2. **Ready:** `clawguandan play ready -t <tableId> -p <playerId>` ; CLI auto-loads `playerKey` from local auth session unless `-k/--player-key` is passed explicitly.
 3. **Until the game is over**, repeat:
    - Run `clawguandan play wait4myturn -t <tableId> -p <playerId>` and **read stdout** (local full state / prompt materialized for this player).
    - **Think** the next legal move and run the matching `clawguandan play ...` command (for example `playcards`, `pass`, `tribute`, `returncard`).
@@ -500,33 +503,34 @@ CLI commands are optional adapters over the Web API, for local testing and bot i
   - Create a new table.
   - Example: `clawguandan table create "Friday Night #1"`
 - `clawguandan table join -t <tableId> --name <playerName> [--type human|ai|unknown] [--seat E|S|W|N|auto] [--no-sync]`
-  - Join a table and receive server-issued `playerId`.
+  - Join a table and receive server-issued `playerId` + `playerKey`.
+  - CLI writes `playerKey` to `<sessionDir>/auth.json` immediately (even with `--no-sync`).
   - By default, after a successful join the CLI runs an internal catch-up (`table sync`) and prints the **local full materialized state** (see `session.json` below). Use `--no-sync` to print only the join API JSON (for scripts).
   - `--type` defaults to `unknown`; `--seat` defaults to `auto`.
   - Example: `clawguandan table join -t t_100 --name "Bot-S" --type ai --seat auto`
-- `clawguandan table nextstate -t <tableId> [-p <playerId>] [--seq <seq>]`
+- `clawguandan table nextstate -t <tableId> [-p <playerId>] [-k <playerKey>] [--seq <seq>]`
   - Long-poll for exactly one next transition (`sinceSeq + 1`).
   - Default stdout is the server JSON (includes `lag`).
   - With `-p` and **auto-seq**, updates `session.json`: on `200`, merges `delta` into the stored `TableState` and refreshes `private`; if there is no stored `TableState`, performs `GET snapshot` first.
   - Without `-p`, runs observer mode (public state only; no session updates).
-- `clawguandan table sync -t <tableId> -p <playerId> [--timeout-ms ...]`
+- `clawguandan table sync -t <tableId> -p <playerId> [-k <playerKey>] [--timeout-ms ...]`
   - Repeats `nextstate` until `lag == 0` or `204` at head; then prints the **local full state** (flattened `TableState` plus optional `private` key). Does not support `--seq` (session auto-seq only).
 
 `play` commands
 
-- `clawguandan play ready -t <tableId> -p <playerId> [--no-sync]`
+- `clawguandan play ready -t <tableId> -p <playerId> [-k <playerKey>] [--no-sync]`
   - `POST .../ready` with `ready: true` (no `seq`). By default runs `table sync` afterward and prints local full state; `--no-sync` prints only the ready API response.
-- `clawguandan play wait4myturn -t <tableId> -p <playerId> [--timeout-ms ...]`
+- `clawguandan play wait4myturn -t <tableId> -p <playerId> [-k <playerKey>] [--timeout-ms ...]`
   - If local session is already at head and `expect` says this player must act, exits immediately with local full state; otherwise long-polls `nextstate` until that is true. Auto-seq only (no `--seq`).
-- `clawguandan play playcards -t <tableId> -p <playerId> [--seq <seq>] "<cards>"`
+- `clawguandan play playcards -t <tableId> -p <playerId> [-k <playerKey>] [--seq <seq>] "<cards>"`
   - Submit a play action with symbol list, comma-separated.
   - Example: `clawguandan play playcards -t t_100 -p p_3 "♠A,♠A,♥10"`
-- `clawguandan play pass -t <tableId> -p <playerId> [--seq <seq>]`
+- `clawguandan play pass -t <tableId> -p <playerId> [-k <playerKey>] [--seq <seq>]`
   - Submit a pass action for current turn.
-- `clawguandan play tribute -t <tableId> -p <playerId> [--seq <seq>] "<card>"`
+- `clawguandan play tribute -t <tableId> -p <playerId> [-k <playerKey>] [--seq <seq>] "<card>"`
   - Submit tribute card symbol.
   - Example: `clawguandan play tribute -t t_100 -p p_3 "♠A"`
-- `clawguandan play returncard -t <tableId> -p <playerId> [--seq <seq>] "<card>"`
+- `clawguandan play returncard -t <tableId> -p <playerId> [-k <playerKey>] [--seq <seq>] "<card>"`
   - Submit return/exchange card symbol after receiving tribute.
   - Example: `clawguandan play returncard -t t_100 -p p_1 "♦10"`
   - After a hand reaches `scoring`, there is no separate CLI command to start the next hand; the server advances automatically to the next hand when scoring is complete.
@@ -536,6 +540,9 @@ CLI commands are optional adapters over the Web API, for local testing and bot i
 - Default mode is **auto-seq** for player commands with `-p <playerId>`.
 - Auto-seq key: `<host>:<port>` derived prefix (e.g. `127.0.0.1_22222`), then `.<tableId>.<playerId>` (dot-separated), one **session directory** per key under `std::env::temp_dir()/clawguandan/<sessionKey>/session.json` (not in global `~/.config/clawguandan/config.json`).
 - `session.json` stores at minimum `lastAppliedSeq`, and when using `table nextstate` / `table sync` / `wait4myturn`, also a materialized public `TableState` plus optional `privateView` for merging deltas and printing local full state.
+- `auth.json` (same session directory) stores player authentication info (`playerId`, `playerKey`), decoupled from game state sync.
+- Player key resolve priority: explicit `--player-key` > auto-load from `auth.json`.
+- Since `playerKey` is server in-memory only, a server restart invalidates old keys; clients should re-join or provide a fresh key when receiving auth errors.
 - `POST .../ready` does not participate in auto-seq for the request body; the CLI still uses session state for post-ready `table sync`.
 - Observer mode (no `-p`) does not support auto-seq persistence.
 - If `--seq` is explicitly provided on supported commands, the CLI runs in **manual-seq** mode: use that value for `sinceSeq` or action `seq`; do not read/write `session.json` for that command (`table sync` and `play wait4myturn` disallow `--seq`).

@@ -196,7 +196,7 @@ function loadSession() {
     const raw = sessionStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.tableId || !parsed.playerId) return null;
+    if (!parsed || !parsed.tableId || !parsed.playerId || !parsed.playerKey) return null;
     return parsed;
   } catch (_err) {
     return null;
@@ -271,6 +271,41 @@ async function recoverWhenServerStateMissing(err) {
     setError(t("serverStateGoneHint"));
   }
   return true;
+}
+
+function isAuthInvalidError(err) {
+  const status = Number(err?.status || err?.body?.error?.status || 0);
+  if (status !== 401 && status !== 403) return false;
+  const msg = String(
+    err?.body?.error?.code ||
+    err?.body?.error?.message ||
+    err?.message ||
+    "",
+  ).toLowerCase();
+  return /player\s*key|playerkey|not\s*seated|forbidden|unauthorized|auth/.test(msg);
+}
+
+async function recoverWhenAuthInvalid(err) {
+  if (!isAuthInvalidError(err)) return false;
+  const ok = window.confirm(t("authInvalidConfirm"));
+  if (ok) {
+    clearSession();
+    setError("");
+  } else {
+    setError(t("authInvalidHint"));
+  }
+  return true;
+}
+
+async function handleRequestError(err, options = {}) {
+  const { showToast = true } = options;
+  if (await recoverWhenServerStateMissing(err)) return;
+  if (await recoverWhenAuthInvalid(err)) return;
+  if (showToast) {
+    showActionToast(err?.message || String(err));
+  } else {
+    setError(err?.message || String(err));
+  }
 }
 
 function setError(message) {
@@ -609,6 +644,7 @@ async function joinTable(options = {}) {
   state.session = {
     tableId,
     playerId: json.playerId,
+    playerKey: json.playerKey,
     playerName,
     lastAppliedSeq: Number(json.newSeq || 0),
   };
@@ -625,6 +661,7 @@ async function joinTableFromLobby(tableId, seat = "auto") {
     return await joinTable({ tableId, seat: seatChoice });
   } catch (err) {
     if (await recoverWhenServerStateMissing(err)) return false;
+    if (await recoverWhenAuthInvalid(err)) return false;
     if (seatChoice !== "auto" && isSeatUnavailableError(err)) {
       const shouldAutoJoin = window.confirm(t("seatTakenAutoJoinConfirm"));
       if (shouldAutoJoin) {
@@ -632,6 +669,7 @@ async function joinTableFromLobby(tableId, seat = "auto") {
           return await joinTable({ tableId, seat: "auto" });
         } catch (retryErr) {
           if (await recoverWhenServerStateMissing(retryErr)) return false;
+          if (await recoverWhenAuthInvalid(retryErr)) return false;
           showActionToast(retryErr.message);
           return false;
         }
@@ -645,7 +683,10 @@ async function joinTableFromLobby(tableId, seat = "auto") {
 
 async function bootstrapSnapshot() {
   if (!state.session) return;
-  const p = new URLSearchParams({ playerId: state.session.playerId });
+  const p = new URLSearchParams({
+    playerId: state.session.playerId,
+    playerKey: state.session.playerKey,
+  });
   const path = `/api/v1/tables/${encodeURIComponent(state.session.tableId)}/snapshot?${p.toString()}`;
   const { json } = await apiFetch(path);
   state.tableState = json;
@@ -686,6 +727,7 @@ async function sendReady() {
       method: "POST",
       body: JSON.stringify({
         playerId: state.session.playerId,
+        playerKey: state.session.playerKey,
         ready: true,
       }),
     });
@@ -704,6 +746,7 @@ async function sendAction(actionType, payload) {
       method: "POST",
       body: JSON.stringify({
         playerId: state.session.playerId,
+        playerKey: state.session.playerKey,
         seq: Number(state.tableState.seq || 0),
         ...payload,
       }),
@@ -857,6 +900,7 @@ async function pollLoop() {
       const qs = new URLSearchParams({
         sinceSeq: String(state.session.lastAppliedSeq || 0),
         playerId: state.session.playerId,
+        playerKey: state.session.playerKey,
         timeoutMs: String(POLL_TIMEOUT_MS),
       });
       const path = `/api/v1/tables/${encodeURIComponent(state.session.tableId)}/nextstate?${qs.toString()}`;
@@ -872,12 +916,18 @@ async function pollLoop() {
       if (await recoverWhenServerStateMissing(err)) {
         continue;
       }
+      if (await recoverWhenAuthInvalid(err)) {
+        continue;
+      }
       setConnection(t("connError"));
       setError(err.message || String(err));
       try {
         await bootstrapSnapshot();
       } catch (reErr) {
         if (await recoverWhenServerStateMissing(reErr)) {
+          continue;
+        }
+        if (await recoverWhenAuthInvalid(reErr)) {
           continue;
         }
         setError(`poll error: ${err.message}; resync failed: ${reErr.message}`);
@@ -1968,10 +2018,14 @@ async function init() {
   });
 
   el.readyBtn.addEventListener("click", () => {
-    sendReady().catch((err) => showActionToast(err.message));
+    sendReady().catch((err) => {
+      handleRequestError(err);
+    });
   });
   el.readyFlowBtn.addEventListener("click", () => {
-    sendReady().catch((err) => showActionToast(err.message));
+    sendReady().catch((err) => {
+      handleRequestError(err);
+    });
   });
 
   el.tributeBtn.addEventListener("click", () => {
@@ -1980,7 +2034,9 @@ async function init() {
       showActionToast(t("errSelectSingleTributeCard"));
       return;
     }
-    sendAction("tribute", { card: cards[0] }).catch((err) => showActionToast(err.message));
+    sendAction("tribute", { card: cards[0] }).catch((err) => {
+      handleRequestError(err);
+    });
   });
 
   el.returnCardBtn.addEventListener("click", () => {
@@ -1989,11 +2045,15 @@ async function init() {
       showActionToast(t("errSelectSingleReturnCard"));
       return;
     }
-    sendAction("return_card", { card: cards[0] }).catch((err) => showActionToast(err.message));
+    sendAction("return_card", { card: cards[0] }).catch((err) => {
+      handleRequestError(err);
+    });
   });
 
   el.passBtn.addEventListener("click", () => {
-    sendAction("pass", {}).catch((err) => showActionToast(err.message));
+    sendAction("pass", {}).catch((err) => {
+      handleRequestError(err);
+    });
   });
 
   el.playBtn.addEventListener("click", () => {
@@ -2002,9 +2062,9 @@ async function init() {
       showActionToast(t("errSelectCards"));
       return;
     }
-    sendAction("play", { cards, declaredWildMapping: null }).catch((err) =>
-      showActionToast(err.message),
-    );
+    sendAction("play", { cards, declaredWildMapping: null }).catch((err) => {
+      handleRequestError(err);
+    });
   });
 
   document.addEventListener("keydown", (ev) => {
@@ -2042,6 +2102,7 @@ async function init() {
   if (state.session) {
     await bootstrapSnapshot().catch(async (err) => {
       if (await recoverWhenServerStateMissing(err)) return;
+      if (await recoverWhenAuthInvalid(err)) return;
       setError(err.message);
     });
     startPolling();

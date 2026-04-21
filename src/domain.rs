@@ -297,6 +297,7 @@ pub struct NextStateBody {
 #[derive(Clone, Debug)]
 pub struct PlayerRecord {
     pub player_id: String,
+    pub player_key: String,
     pub player_name: String,
     pub player_type: PlayerType,
     pub player_model: Option<String>,

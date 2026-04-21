@@ -5,6 +5,7 @@ use axum::body::Body;
 use axum::http::Request;
 use http_body_util::BodyExt;
 use serde::Deserialize;
+use std::collections::HashMap;
 use tower::ServiceExt;
 
 use crate::error::AppError;
@@ -18,6 +19,7 @@ pub enum HttpSimError {
     Store(AppError),
     Movegen(String),
     NoActor,
+    MissingPlayerKey(String),
     MaxPlies,
     Router(String),
 }
@@ -28,6 +30,7 @@ impl std::fmt::Display for HttpSimError {
             HttpSimError::Store(e) => write!(f, "{e}"),
             HttpSimError::Movegen(s) => write!(f, "{s}"),
             HttpSimError::NoActor => write!(f, "no player_id for actor seat"),
+            HttpSimError::MissingPlayerKey(pid) => write!(f, "missing player_key for player_id {pid}"),
             HttpSimError::MaxPlies => write!(f, "max_plies exceeded"),
             HttpSimError::Router(s) => write!(f, "{s}"),
         }
@@ -58,10 +61,11 @@ async fn get_suggest_router(
     table_id: &str,
     seq: u64,
     player_id: &str,
+    player_key: &str,
 ) -> Result<SuggestHttpBody, HttpSimError> {
     let uri = format!(
-        "/api/v1/tables/{}/suggest?seq={}&playerId={}",
-        table_id, seq, player_id
+        "/api/v1/tables/{}/suggest?seq={}&playerId={}&playerKey={}",
+        table_id, seq, player_id, player_key
     );
     let req = Request::builder()
         .method("GET")
@@ -96,16 +100,19 @@ async fn post_action_router(
     table_id: &str,
     action: &PlayerAction,
     player_id: &str,
+    player_key: &str,
     seq: u64,
 ) -> Result<u64, HttpSimError> {
     let (suffix, body) = action.to_http_action_request(player_id, seq);
+    let mut body_obj = body;
+    body_obj["playerKey"] = serde_json::json!(player_key);
     let uri = format!("/api/v1/tables/{}/actions/{}", table_id, suffix);
     let req = Request::builder()
         .method("POST")
         .uri(uri)
         .header("content-type", "application/json")
         .body(Body::from(
-            serde_json::to_string(&body).map_err(|e| HttpSimError::Router(e.to_string()))?,
+            serde_json::to_string(&body_obj).map_err(|e| HttpSimError::Router(e.to_string()))?,
         ))
         .map_err(|e| HttpSimError::Router(e.to_string()))?;
     let res = app
@@ -138,6 +145,7 @@ pub async fn run_hand_until_scoring_via_router(
     app: Router,
     store: &TableStore,
     table_id: &str,
+    player_keys: &HashMap<String, String>,
     max_plies: usize,
 ) -> Result<(), HttpSimError> {
     let mut plies = 0usize;
@@ -159,10 +167,13 @@ pub async fn run_hand_until_scoring_via_router(
         let Some(pid) = snap.player_id_for_seat(actor) else {
             return Err(HttpSimError::NoActor);
         };
-        let sug = get_suggest_router(app.clone(), table_id, seq, &pid).await?;
+        let pkey = player_keys
+            .get(&pid)
+            .ok_or_else(|| HttpSimError::MissingPlayerKey(pid.clone()))?;
+        let sug = get_suggest_router(app.clone(), table_id, seq, &pid, pkey).await?;
         let action = PlayerAction::try_from_action_type_payload(&sug.action_type, &sug.payload)
             .map_err(HttpSimError::Movegen)?;
-        post_action_router(app.clone(), table_id, &action, &pid, seq).await?;
+        post_action_router(app.clone(), table_id, &action, &pid, pkey, seq).await?;
         plies += 1;
     }
 }

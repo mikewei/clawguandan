@@ -187,6 +187,7 @@ fn default_seat_auto() -> String {
 #[serde(rename_all = "camelCase")]
 pub struct JoinResponse {
     pub player_id: String,
+    pub player_key: String,
     pub seat: String,
     pub player_type: PlayerType,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -200,7 +201,7 @@ async fn join_table(
     Json(body): Json<JoinBody>,
 ) -> Result<Json<JoinResponse>, AppError> {
     let seat = SeatOrAuto::parse(&body.seat)?;
-    let (pid, seat, pt, player_model) = state
+    let (pid, pkey, seat, pt, player_model) = state
         .store
         .join(
             &table_id,
@@ -213,6 +214,7 @@ async fn join_table(
     let snap = state.store.get_snapshot(&table_id).await?;
     Ok(Json(JoinResponse {
         player_id: pid,
+        player_key: pkey,
         seat: seat.as_str().into(),
         player_type: pt,
         player_model,
@@ -224,6 +226,7 @@ async fn join_table(
 #[serde(rename_all = "camelCase")]
 pub struct ReadyBody {
     pub player_id: String,
+    pub player_key: String,
     pub ready: bool,
 }
 
@@ -238,6 +241,7 @@ pub struct ReadyResponse {
 #[serde(rename_all = "camelCase")]
 pub struct TributeBody {
     pub player_id: String,
+    pub player_key: String,
     pub seq: u64,
     pub card: String,
 }
@@ -246,6 +250,7 @@ pub struct TributeBody {
 #[serde(rename_all = "camelCase")]
 pub struct ReturnCardBody {
     pub player_id: String,
+    pub player_key: String,
     pub seq: u64,
     pub card: String,
 }
@@ -254,6 +259,7 @@ pub struct ReturnCardBody {
 #[serde(rename_all = "camelCase")]
 pub struct PlayBody {
     pub player_id: String,
+    pub player_key: String,
     pub seq: u64,
     pub cards: Vec<String>,
     pub declared_wild_mapping: Option<serde_json::Value>,
@@ -263,6 +269,7 @@ pub struct PlayBody {
 #[serde(rename_all = "camelCase")]
 pub struct PassBody {
     pub player_id: String,
+    pub player_key: String,
     pub seq: u64,
 }
 
@@ -279,7 +286,7 @@ async fn ready(
 ) -> Result<Json<ReadyResponse>, AppError> {
     let new_seq = state
         .store
-        .set_ready(&table_id, &body.player_id, body.ready)
+        .set_ready(&table_id, &body.player_id, &body.player_key, body.ready)
         .await?;
     Ok(Json(ReadyResponse {
         new_seq,
@@ -297,6 +304,7 @@ async fn action_tribute(
         .apply_action(
             &table_id,
             &body.player_id,
+            &body.player_key,
             body.seq,
             "tribute",
             serde_json::json!({ "card": body.card }),
@@ -315,6 +323,7 @@ async fn action_return_card(
         .apply_action(
             &table_id,
             &body.player_id,
+            &body.player_key,
             body.seq,
             "return_card",
             serde_json::json!({ "card": body.card }),
@@ -333,6 +342,7 @@ async fn action_play(
         .apply_action(
             &table_id,
             &body.player_id,
+            &body.player_key,
             body.seq,
             "play",
             serde_json::json!({
@@ -354,6 +364,7 @@ async fn action_pass(
         .apply_action(
             &table_id,
             &body.player_id,
+            &body.player_key,
             body.seq,
             "pass",
             serde_json::json!({}),
@@ -367,6 +378,7 @@ async fn action_pass(
 pub struct SuggestQuery {
     pub seq: u64,
     pub player_id: String,
+    pub player_key: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -386,8 +398,9 @@ async fn suggest(
 ) -> Result<Json<SuggestResponse>, AppError> {
     state
         .store
-        .touch_player_activity(&table_id, &q.player_id)
+        .verify_player_identity(&table_id, &q.player_id, &q.player_key)
         .await?;
+    state.store.touch_player_activity(&table_id, &q.player_id).await?;
     let snap = state.store.get_snapshot(&table_id).await?;
     if q.seq != snap.seq {
         return Err(AppError::Conflict {
@@ -439,6 +452,7 @@ async fn suggest(
 pub struct NextStateQuery {
     pub since_seq: u64,
     pub player_id: Option<String>,
+    pub player_key: Option<String>,
     pub timeout_ms: Option<u64>,
 }
 
@@ -447,6 +461,7 @@ pub struct NextStateQuery {
 pub struct NextStatePostBody {
     pub since_seq: u64,
     pub player_id: Option<String>,
+    pub player_key: Option<String>,
     pub timeout_ms: Option<u64>,
 }
 
@@ -469,6 +484,7 @@ async fn nextstate_post(
         NextStateQuery {
             since_seq: body.since_seq,
             player_id: body.player_id,
+            player_key: body.player_key,
             timeout_ms: body.timeout_ms,
         },
     )
@@ -483,7 +499,13 @@ async fn nextstate_inner(
     let timeout = q.timeout_ms.map(std::time::Duration::from_millis);
     let body = state
         .store
-        .next_state_with_prompt(&table_id, q.since_seq, q.player_id.as_deref(), timeout)
+        .next_state_with_prompt(
+            &table_id,
+            q.since_seq,
+            q.player_id.as_deref(),
+            q.player_key.as_deref(),
+            timeout,
+        )
         .await?;
     match body {
         Some(b) => Ok((StatusCode::OK, Json(b)).into_response()),
@@ -516,6 +538,7 @@ pub fn app() -> Router {
 pub struct SnapshotQuery {
     pub at_seq: Option<u64>,
     pub player_id: Option<String>,
+    pub player_key: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -541,11 +564,14 @@ async fn snapshot(
         )));
     }
     if let Some(ref pid) = q.player_id {
-        if snap.seat_for_player(pid).is_none() {
-            return Err(AppError::BadRequest(
-                "playerId is not seated at this table".into(),
-            ));
-        }
+        let pkey = q
+            .player_key
+            .as_deref()
+            .ok_or_else(|| AppError::BadRequest("playerKey is required with playerId".into()))?;
+        state
+            .store
+            .verify_player_identity(&table_id, pid.as_str(), pkey)
+            .await?;
         state
             .store
             .touch_player_activity(&table_id, pid.as_str())

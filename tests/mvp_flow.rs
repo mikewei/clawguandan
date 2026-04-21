@@ -6,6 +6,7 @@ use clawguandan::api::app_with_store;
 use clawguandan::store::TableStore;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use tower::ServiceExt;
 
 async fn read_json(res: axum::response::Response) -> Value {
@@ -85,7 +86,7 @@ async fn list_tables_empty_and_lobby() {
 #[tokio::test]
 async fn list_tables_detail_hand_matches_observer_snapshot() {
     let app = app_with_store(TableStore::new());
-    let (app, table_id, _pids, _seq) = create_ready_table(app).await;
+    let (app, table_id, _pids, _keys, _seq) = create_ready_table(app).await;
 
     let res = app
         .clone()
@@ -132,7 +133,9 @@ async fn list_tables_detail_hand_matches_observer_snapshot() {
     assert_eq!(list_d["tables"][0]["state"]["hand"], snap["hand"]);
 }
 
-async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<String>, u64) {
+async fn create_ready_table(
+    app: axum::Router,
+) -> (axum::Router, String, Vec<String>, HashMap<String, String>, u64) {
     let res = app
         .clone()
         .oneshot(
@@ -148,6 +151,7 @@ async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<Str
     let v = read_json(res).await;
     let table_id = v["tableId"].as_str().unwrap().to_string();
     let mut pids = Vec::new();
+    let mut keys: HashMap<String, String> = HashMap::new();
     for i in 0..4 {
         let res = app
             .clone()
@@ -168,7 +172,10 @@ async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<Str
             .await
             .unwrap();
         let body = read_json(res).await;
-        pids.push(body["playerId"].as_str().unwrap().to_string());
+        let pid = body["playerId"].as_str().unwrap().to_string();
+        let pkey = body["playerKey"].as_str().unwrap().to_string();
+        keys.insert(pid.clone(), pkey);
+        pids.push(pid);
     }
     let mut seq = 0u64;
     for pid in &pids {
@@ -180,7 +187,12 @@ async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<Str
                     .uri(format!("/api/v1/tables/{}/ready", table_id))
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        json!({"playerId": pid, "ready": true}).to_string(),
+                        json!({
+                            "playerId": pid,
+                            "playerKey": keys.get(pid).unwrap(),
+                            "ready": true
+                        })
+                        .to_string(),
                     ))
                     .unwrap(),
             )
@@ -189,7 +201,7 @@ async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<Str
         let body = read_json(res).await;
         seq = body["newSeq"].as_u64().unwrap();
     }
-    (app, table_id, pids, seq)
+    (app, table_id, pids, keys, seq)
 }
 
 #[tokio::test]
@@ -215,6 +227,7 @@ async fn create_join_ready_game_started_flow() {
     assert_eq!(v["status"], "waiting");
 
     let mut pids = Vec::new();
+    let mut keys: HashMap<String, String> = HashMap::new();
     for i in 0..4 {
         let res = app
             .clone()
@@ -236,7 +249,10 @@ async fn create_join_ready_game_started_flow() {
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK, "join {}", i);
         let body = read_json(res).await;
-        pids.push(body["playerId"].as_str().unwrap().to_string());
+        let pid = body["playerId"].as_str().unwrap().to_string();
+        let pkey = body["playerKey"].as_str().unwrap().to_string();
+        keys.insert(pid.clone(), pkey);
+        pids.push(pid);
     }
     let last_pid = pids.last().cloned().unwrap();
 
@@ -272,6 +288,7 @@ async fn create_join_ready_game_started_flow() {
                     .body(Body::from(
                         json!({
                             "playerId": pid,
+                            "playerKey": keys.get(pid).unwrap(),
                             "ready": true,
                         })
                         .to_string(),
@@ -524,6 +541,7 @@ async fn ready_idempotent_does_not_advance_seq() {
     assert_eq!(res.status(), StatusCode::OK);
     let join = read_json(res).await;
     let pid = join["playerId"].as_str().unwrap();
+    let pkey = join["playerKey"].as_str().unwrap();
 
     let res = app
         .clone()
@@ -535,6 +553,7 @@ async fn ready_idempotent_does_not_advance_seq() {
                 .body(Body::from(
                     json!({
                         "playerId": pid,
+                        "playerKey": pkey,
                         "ready": true,
                     })
                     .to_string(),
@@ -557,6 +576,7 @@ async fn ready_idempotent_does_not_advance_seq() {
                 .body(Body::from(
                     json!({
                         "playerId": pid,
+                        "playerKey": pkey,
                         "ready": true,
                     })
                     .to_string(),
@@ -623,6 +643,7 @@ async fn snapshot_private_visibility() {
     assert_eq!(res.status(), StatusCode::OK);
     let join = read_json(res).await;
     let pid = join["playerId"].as_str().unwrap();
+    let pkey = join["playerKey"].as_str().unwrap();
     let seat = join["seat"].as_str().unwrap();
 
     // Observer snapshot: no `private`.
@@ -648,8 +669,8 @@ async fn snapshot_private_visibility() {
             Request::builder()
                 .method("GET")
                 .uri(format!(
-                    "/api/v1/tables/{}/snapshot?playerId={}",
-                    table_id, pid
+                    "/api/v1/tables/{}/snapshot?playerId={}&playerKey={}",
+                    table_id, pid, pkey
                 ))
                 .body(Body::empty())
                 .unwrap(),
@@ -672,9 +693,115 @@ async fn snapshot_private_visibility() {
 }
 
 #[tokio::test]
+async fn join_returns_player_key() {
+    let app = app_with_store(TableStore::new());
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/tables")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let table_id = read_json(res).await["tableId"].as_str().unwrap().to_string();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/tables/{}/join", table_id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"playerName":"A","seat":"auto"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = read_json(res).await;
+    assert!(body["playerKey"].as_str().is_some_and(|s| !s.is_empty()));
+}
+
+#[tokio::test]
+async fn snapshot_with_player_id_requires_player_key() {
+    let app = app_with_store(TableStore::new());
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/tables")
+                .header("content-type", "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let table_id = read_json(res).await["tableId"].as_str().unwrap().to_string();
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/tables/{}/join", table_id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({"playerName":"A","seat":"auto"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let pid = read_json(res).await["playerId"].as_str().unwrap().to_string();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/tables/{}/snapshot?playerId={}", table_id, pid))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn action_with_wrong_player_key_is_forbidden() {
+    let app = app_with_store(TableStore::new());
+    let (app, table_id, pids, _keys, seq) = create_ready_table(app).await;
+    let pid = &pids[0];
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/tables/{}/actions/pass", table_id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "playerId": pid,
+                        "playerKey": "wrong-key",
+                        "seq": seq
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn action_endpoints_advance_seq_and_emit_transition() {
     let app = app_with_store(TableStore::new());
-    let (app, table_id, pids, mut seq) = create_ready_table(app).await;
+    let (app, table_id, pids, keys, mut seq) = create_ready_table(app).await;
     let pid = &pids[0];
 
     // First hand skips tribute; E leads — pass is legal when following (here: wrong test if leading with cards).
@@ -690,7 +817,12 @@ async fn action_endpoints_advance_seq_and_emit_transition() {
                 .uri(format!("/api/v1/tables/{}/actions/pass", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"playerId": &pids[1], "seq": seq}).to_string(),
+                    json!({
+                        "playerId": &pids[1],
+                        "playerKey": keys.get(&pids[1]).unwrap(),
+                        "seq": seq
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -705,7 +837,14 @@ async fn action_endpoints_advance_seq_and_emit_transition() {
                 .method("POST")
                 .uri(format!("/api/v1/tables/{}/actions/pass", table_id))
                 .header("content-type", "application/json")
-                .body(Body::from(json!({"playerId": pid, "seq": seq}).to_string()))
+                .body(Body::from(
+                    json!({
+                        "playerId": pid,
+                        "playerKey": keys.get(pid).unwrap(),
+                        "seq": seq
+                    })
+                    .to_string(),
+                ))
                 .unwrap(),
         )
         .await
@@ -723,8 +862,11 @@ async fn action_endpoints_advance_seq_and_emit_transition() {
             Request::builder()
                 .method("GET")
                 .uri(format!(
-                    "/api/v1/tables/{}/suggest?playerId={}&seq={}",
-                    table_id, pid, seq
+                    "/api/v1/tables/{}/suggest?playerId={}&playerKey={}&seq={}",
+                    table_id,
+                    pid,
+                    keys.get(pid).unwrap(),
+                    seq
                 ))
                 .body(Body::empty())
                 .unwrap(),
@@ -737,6 +879,7 @@ async fn action_endpoints_advance_seq_and_emit_transition() {
     let payload = &sug["payload"];
     let mut play_body = json!({
         "playerId": pid,
+        "playerKey": keys.get(pid).unwrap(),
         "seq": seq,
         "cards": payload["cards"].clone(),
     });
@@ -784,7 +927,7 @@ async fn action_endpoints_advance_seq_and_emit_transition() {
 #[tokio::test]
 async fn failed_action_does_not_advance_seq() {
     let app = app_with_store(TableStore::new());
-    let (app, table_id, pids, seq) = create_ready_table(app).await;
+    let (app, table_id, pids, keys, seq) = create_ready_table(app).await;
     let pid = &pids[0];
 
     // return_card in Dealing should fail with 422.
@@ -796,7 +939,13 @@ async fn failed_action_does_not_advance_seq() {
                 .uri(format!("/api/v1/tables/{}/actions/return_card", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"playerId": pid, "seq": seq, "card": "♠3"}).to_string(),
+                    json!({
+                        "playerId": pid,
+                        "playerKey": keys.get(pid).unwrap(),
+                        "seq": seq,
+                        "card": "♠3"
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -839,7 +988,7 @@ async fn failed_action_does_not_advance_seq() {
 #[tokio::test]
 async fn action_stale_seq_returns_409() {
     let app = app_with_store(TableStore::new());
-    let (app, table_id, pids, seq) = create_ready_table(app).await;
+    let (app, table_id, pids, keys, seq) = create_ready_table(app).await;
     let pid = &pids[0];
 
     let res = app
@@ -849,7 +998,12 @@ async fn action_stale_seq_returns_409() {
                 .uri(format!("/api/v1/tables/{}/actions/pass", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"playerId": pid, "seq": seq - 1}).to_string(),
+                    json!({
+                        "playerId": pid,
+                        "playerKey": keys.get(pid).unwrap(),
+                        "seq": seq - 1
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -864,7 +1018,7 @@ async fn action_stale_seq_returns_409() {
 #[tokio::test]
 async fn action_non_seated_player_returns_403() {
     let app = app_with_store(TableStore::new());
-    let (app, table_id, _pids, seq) = create_ready_table(app).await;
+    let (app, table_id, _pids, _keys, seq) = create_ready_table(app).await;
 
     let res = app
         .oneshot(
@@ -873,7 +1027,12 @@ async fn action_non_seated_player_returns_403() {
                 .uri(format!("/api/v1/tables/{}/actions/pass", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"playerId": "p_not_seated", "seq": seq}).to_string(),
+                    json!({
+                        "playerId": "p_not_seated",
+                        "playerKey": "wrong-key",
+                        "seq": seq
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )

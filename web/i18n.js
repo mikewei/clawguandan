@@ -104,6 +104,10 @@
         "The server no longer has your local game state. Clear local session and return to lobby?",
       serverStateGoneHint:
         "Server state is missing. You can retry or clear local session from the debug panel.",
+      authInvalidConfirm:
+        "Authentication expired or is invalid. Clear local session and return to lobby to re-join?",
+      authInvalidHint:
+        "Authentication failed. Re-join the table to get a new player key (for example after server restart).",
       playerNameDialogTitle: "Enter player name",
       playerNameDialogHint: "Enter a name before joining a table.",
       confirm: "Confirm",
@@ -212,6 +216,10 @@
         "服务端已没有你的本地对局状态。是否清空本地会话并返回大厅？",
       serverStateGoneHint:
         "服务端状态缺失。你可以重试，或在调试面板中清空本地会话。",
+      authInvalidConfirm:
+        "身份认证已失效或无效。是否清空本地会话并返回大厅重新加入？",
+      authInvalidHint:
+        "认证失败。请重新加入牌桌以获取新的 playerKey（例如服务端重启后）。",
       playerNameDialogTitle: "输入玩家名",
       playerNameDialogHint: "加入牌桌前请先输入玩家名。",
       confirm: "确认",

@@ -18,9 +18,12 @@ cargo run --bin clawguandan -- table create "Friday"
 cargo run --bin clawguandan -- table create "Friday" --rank 8
 cargo run --bin clawguandan -- table join -t <tableId> --name Alice --seat auto
 cargo run --bin clawguandan -- table join -t <tableId> --name Bot-S --type ai --model gpt-4o --seat auto
-# 先 `table nextstate` 同步 lastAppliedSeq（写入 temp 下按会话的 session.json），再 `play ready`（auto-seq）
+# join 会下发 playerKey，CLI 自动写入同会话目录下的 auth.json（无需手填）
+# 先 `table nextstate` 同步 lastAppliedSeq（写入 session.json），再 `play ready`（auto-seq + auto playerKey）
 cargo run --bin clawguandan -- table nextstate -t <tableId> -p <playerId>
 cargo run --bin clawguandan -- play ready -t <tableId> -p <playerId>
+# 如需显式覆盖，也可传 --player-key/-k
+cargo run --bin clawguandan -- play ready -t <tableId> -p <playerId> -k <playerKey>
 ```
 
 `table create` 不传 `--rank` 时默认从 `2` 开始；可选值为 `2-10/J/Q/K/A`。
