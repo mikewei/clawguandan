@@ -10,6 +10,8 @@ const TRICK_LOOKBACK_LIMIT = 16;
 const HAND_GROUP_CHAIN_MS = 250;
 const SVG_CARDS_SPRITE_PATH = "/cards/svg-cards/svg-cards.svg";
 const SVG_CARD_VIEWBOX = "0 0 169.075 244.64";
+const SESSION_MODE_PLAYER = "player";
+const SESSION_MODE_OBSERVER = "observer";
 const CREATE_RANK_OPTIONS = new Set([
   "2",
   "3",
@@ -88,8 +90,14 @@ const el = {
   returnRow: document.getElementById("returnRow"),
   returnCardBtn: document.getElementById("returnCardBtn"),
   privateHand: document.getElementById("privateHand"),
+  privateHandArea: document.querySelector(".private-hand-area"),
   playBtn: document.getElementById("playBtn"),
 };
+
+const stateReplay = window.stateReplay;
+if (!stateReplay || typeof stateReplay.applyTransitionBody !== "function") {
+  throw new Error("stateReplay module is missing applyTransitionBody()");
+}
 
 let t = window.i18n && window.i18n.t ? window.i18n.t : (key) => key;
 let tf = window.i18n && window.i18n.tf
@@ -196,11 +204,58 @@ function loadSession() {
     const raw = sessionStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed || !parsed.tableId || !parsed.playerId || !parsed.playerKey) return null;
-    return parsed;
+    if (!parsed || !parsed.tableId) return null;
+    if (parsed.mode === SESSION_MODE_OBSERVER) {
+      return {
+        mode: SESSION_MODE_OBSERVER,
+        tableId: String(parsed.tableId),
+        lastAppliedSeq: Number(parsed.lastAppliedSeq || 0),
+      };
+    }
+    if (!parsed.playerId || !parsed.playerKey) return null;
+    return {
+      mode: SESSION_MODE_PLAYER,
+      tableId: String(parsed.tableId),
+      playerId: String(parsed.playerId),
+      playerKey: String(parsed.playerKey),
+      playerName: String(parsed.playerName || ""),
+      lastAppliedSeq: Number(parsed.lastAppliedSeq || 0),
+    };
   } catch (_err) {
     return null;
   }
+}
+
+function isObserverSession(session) {
+  return Boolean(session && session.mode === SESSION_MODE_OBSERVER);
+}
+
+function isPlayerSession(session) {
+  return Boolean(
+    session
+      && session.mode !== SESSION_MODE_OBSERVER
+      && session.playerId
+      && session.playerKey,
+  );
+}
+
+function createObserverSession(tableId) {
+  return {
+    mode: SESSION_MODE_OBSERVER,
+    tableId: String(tableId || ""),
+    lastAppliedSeq: 0,
+  };
+}
+
+function createPlayerSession(data) {
+  return {
+    mode: SESSION_MODE_PLAYER,
+    tableId: String(data.tableId || ""),
+    playerId: String(data.playerId || ""),
+    playerKey: String(data.playerKey || ""),
+    playerName: String(data.playerName || ""),
+    lastAppliedSeq: Number(data.lastAppliedSeq || 0),
+  };
 }
 
 function loadPreferredPlayerName() {
@@ -524,74 +579,6 @@ async function apiFetch(path, options = {}) {
   return { response, json };
 }
 
-function toPointerSegments(pointer) {
-  if (!pointer.startsWith("/")) {
-    throw new Error(`path must start with /: ${pointer}`);
-  }
-  return pointer
-    .slice(1)
-    .split("/")
-    .map((seg) => seg.replaceAll("~1", "/").replaceAll("~0", "~"));
-}
-
-function applyReplace(root, pointer, value) {
-  const segs = toPointerSegments(pointer);
-  let cur = root;
-  for (let i = 0; i < segs.length - 1; i += 1) {
-    const key = segs[i];
-    if (cur == null || typeof cur !== "object" || !(key in cur)) {
-      throw new Error(`replace: missing key ${key} for ${pointer}`);
-    }
-    cur = cur[key];
-  }
-  const leaf = segs[segs.length - 1];
-  if (cur == null || typeof cur !== "object" || !(leaf in cur)) {
-    throw new Error(`replace: missing leaf ${leaf} for ${pointer}`);
-  }
-  cur[leaf] = value;
-}
-
-function applyAdd(root, pointer, value) {
-  if (!pointer.endsWith("/-")) {
-    throw new Error(`unsupported add path (must end with /-): ${pointer}`);
-  }
-  const base = pointer.slice(0, -2);
-  const segs = toPointerSegments(base);
-  let cur = root;
-  for (const seg of segs) {
-    if (cur == null || typeof cur !== "object" || !(seg in cur)) {
-      throw new Error(`add: missing key ${seg} for ${pointer}`);
-    }
-    cur = cur[seg];
-  }
-  if (!Array.isArray(cur)) {
-    throw new Error(`add: parent is not array for ${pointer}`);
-  }
-  cur.push(value);
-}
-
-function applyDeltaOpsInPlace(tableState, ops) {
-  for (const op of ops) {
-    if (!op || typeof op !== "object") {
-      throw new Error(`invalid op: ${JSON.stringify(op)}`);
-    }
-    const kind = op.op;
-    const path = op.path;
-    if (kind !== "replace" && kind !== "add") {
-      throw new Error(`unsupported op kind: ${kind}`);
-    }
-    if (kind === "replace") {
-      applyReplace(tableState, path, op.value);
-    } else {
-      applyAdd(tableState, path, op.value);
-    }
-  }
-}
-
-function summarizeDeltaPaths(ops) {
-  return (ops || []).map((x) => x.path).slice(0, 8);
-}
-
 async function refreshLobby() {
   const { json } = await apiFetch("/api/v1/tables");
   state.tables = json.tables || [];
@@ -617,6 +604,30 @@ async function createTable(name = "", rank = "2") {
   return json.tableId || "";
 }
 
+const syncDriver = {
+  buildSnapshotQuery(session) {
+    if (!session) return new URLSearchParams();
+    if (isPlayerSession(session)) {
+      return new URLSearchParams({
+        playerId: session.playerId,
+        playerKey: session.playerKey,
+      });
+    }
+    return new URLSearchParams();
+  },
+  buildNextstateQuery(session) {
+    const params = new URLSearchParams({
+      sinceSeq: String(session?.lastAppliedSeq || 0),
+      timeoutMs: String(POLL_TIMEOUT_MS),
+    });
+    if (isPlayerSession(session)) {
+      params.set("playerId", session.playerId);
+      params.set("playerKey", session.playerKey);
+    }
+    return params;
+  },
+};
+
 async function joinTable(options = {}) {
   setError("");
   const tableId = String(options.tableId || "").trim();
@@ -641,13 +652,28 @@ async function joinTable(options = {}) {
     }),
   });
 
-  state.session = {
+  state.session = createPlayerSession({
     tableId,
     playerId: json.playerId,
     playerKey: json.playerKey,
     playerName,
     lastAppliedSeq: Number(json.newSeq || 0),
-  };
+  });
+  saveSession();
+  stopLobbyAutoRefresh();
+  await bootstrapSnapshot();
+  startPolling();
+  return true;
+}
+
+async function spectateTable(tableId) {
+  setError("");
+  const nextTableId = String(tableId || "").trim();
+  if (!nextTableId) {
+    showActionToast(t("errTableRequired"));
+    return false;
+  }
+  state.session = createObserverSession(nextTableId);
   saveSession();
   stopLobbyAutoRefresh();
   await bootstrapSnapshot();
@@ -681,16 +707,23 @@ async function joinTableFromLobby(tableId, seat = "auto") {
   }
 }
 
+async function spectateTableFromLobby(tableId) {
+  try {
+    return await spectateTable(tableId);
+  } catch (err) {
+    if (await recoverWhenServerStateMissing(err)) return false;
+    showActionToast(err.message);
+    return false;
+  }
+}
+
 async function bootstrapSnapshot() {
   if (!state.session) return;
-  const p = new URLSearchParams({
-    playerId: state.session.playerId,
-    playerKey: state.session.playerKey,
-  });
+  const p = syncDriver.buildSnapshotQuery(state.session);
   const path = `/api/v1/tables/${encodeURIComponent(state.session.tableId)}/snapshot?${p.toString()}`;
   const { json } = await apiFetch(path);
   state.tableState = json;
-  state.privateView = json.private || null;
+  state.privateView = isPlayerSession(state.session) ? (json.private || null) : null;
   state.expect = json.expect || null;
   state.prompt = "";
   state.pendingReadySubmit = false;
@@ -703,7 +736,7 @@ async function bootstrapSnapshot() {
 }
 
 function canCurrentPlayerAct(kind) {
-  if (!state.session || !state.expect) return false;
+  if (!isPlayerSession(state.session) || !state.expect) return false;
   if (!state.expect.legalActions || !state.expect.legalActions.includes(kind)) {
     return false;
   }
@@ -719,7 +752,7 @@ function canCurrentPlayerAct(kind) {
 }
 
 async function sendReady() {
-  if (!state.session) return;
+  if (!isPlayerSession(state.session)) return;
   state.pendingReadySubmit = true;
   render();
   try {
@@ -739,7 +772,7 @@ async function sendReady() {
 }
 
 async function sendAction(actionType, payload) {
-  if (!state.session || !state.tableState) return;
+  if (!isPlayerSession(state.session) || !state.tableState) return;
   await apiFetch(
     `/api/v1/tables/${encodeURIComponent(state.session.tableId)}/actions/${actionType}`,
     {
@@ -854,32 +887,25 @@ async function handleTransitionBody(body) {
   if (!state.session || !state.tableState) {
     throw new Error("no local state for transition apply");
   }
-  const expectedPrev = Number(state.session.lastAppliedSeq || 0);
-  if (Number(body.prevSeq) !== expectedPrev) {
-    throw new Error(
-      `seq gap: transition.prevSeq=${body.prevSeq}, local=${expectedPrev}`,
-    );
-  }
-
-  const clone = structuredClone(state.tableState);
-  applyDeltaOpsInPlace(clone, body.delta?.ops || []);
-
-  const newPrivate = body.private || null;
-
-  state.tableState = clone;
-  state.privateView = newPrivate;
-  state.expect = body.expect || clone.expect || null;
+  const replayed = stateReplay.applyTransitionBody({
+    tableState: state.tableState,
+    lastAppliedSeq: state.session.lastAppliedSeq,
+    body,
+  });
+  state.tableState = replayed.tableState;
+  state.privateView = isPlayerSession(state.session) ? replayed.privateView : null;
+  state.expect = replayed.expect;
   if (state.pendingReadySubmit && state.session?.playerId) {
-    const mine = getSeatInfoByPlayerId(clone, state.session.playerId);
+    const mine = getSeatInfoByPlayerId(replayed.tableState, state.session.playerId);
     if (mine?.info?.ready || state.expect?.kind !== "ready") {
       state.pendingReadySubmit = false;
     }
   }
-  state.prompt = body.prompt || "";
-  state.lastDeltaPaths = summarizeDeltaPaths(body.delta?.ops || []);
-  state.session.lastAppliedSeq = Number(body.seq);
+  state.prompt = replayed.prompt;
+  state.lastDeltaPaths = replayed.lastDeltaPaths;
+  state.session.lastAppliedSeq = replayed.lastAppliedSeq;
   state.selectedHandIndexes.clear();
-  consumeActionEvent(body.delta?.event?.trigger, clone);
+  consumeActionEvent(replayed.trigger, replayed.tableState);
   saveSession();
 
   console.log("[table-transition]", {
@@ -897,12 +923,7 @@ async function pollLoop() {
   setConnection(t("connPolling"));
   while (!state.stopPolling && state.session) {
     try {
-      const qs = new URLSearchParams({
-        sinceSeq: String(state.session.lastAppliedSeq || 0),
-        playerId: state.session.playerId,
-        playerKey: state.session.playerKey,
-        timeoutMs: String(POLL_TIMEOUT_MS),
-      });
+      const qs = syncDriver.buildNextstateQuery(state.session);
       const path = `/api/v1/tables/${encodeURIComponent(state.session.tableId)}/nextstate?${qs.toString()}`;
       const { response, json } = await apiFetch(path, { method: "GET" });
       if (response.status === 204) {
@@ -945,7 +966,7 @@ function startPolling() {
 }
 
 function shouldShowTableScene() {
-  return Boolean(state.session);
+  return Boolean(state.session?.tableId);
 }
 
 function isPortraitPhoneTableMode() {
@@ -957,6 +978,15 @@ function isPortraitPhoneTableMode() {
 
 function shouldUseTrickFeedMode(table, mySeat) {
   return isPortraitPhoneTableMode();
+}
+
+function resolveViewCapabilities() {
+  const observer = isObserverSession(state.session);
+  return {
+    isObserver: observer,
+    showPrivateHand: !observer,
+    canOperate: !observer,
+  };
 }
 
 function viewportSizeKey() {
@@ -1062,6 +1092,7 @@ function getSeatInfoByPlayerId(table, playerId) {
 }
 
 function getMySeat(table) {
+  if (isObserverSession(state.session)) return "S";
   return getSeatInfoByPlayerId(table, state.session?.playerId || "")?.seat || "S";
 }
 
@@ -1609,6 +1640,7 @@ function renderTables() {
     const node = document.createElement("div");
     node.className = "table-card";
     const tableState = item.state || {};
+    const tableSimpleState = deriveSimpleTableState(tableState.status, tableState.phase);
 
     const head = document.createElement("div");
     head.className = "table-card-head";
@@ -1671,7 +1703,13 @@ function renderTables() {
         cell.appendChild(idle);
         cell.addEventListener("click", (ev) => {
           ev.stopPropagation();
-          joinTableFromLobby(tableState.tableId || "", pos);
+          if (tableSimpleState === "waiting") {
+            joinTableFromLobby(tableState.tableId || "", pos);
+          } else if (tableSimpleState === "inGame") {
+            spectateTableFromLobby(tableState.tableId || "");
+          } else {
+            showActionToast(t("tableStateSimple.finished"));
+          }
         });
       } else {
         const seatLabel = document.createElement("div");
@@ -1704,18 +1742,29 @@ function renderTables() {
 
     const actions = document.createElement("div");
     actions.className = "table-card-actions";
-    const quickJoin = document.createElement("button");
-    quickJoin.type = "button";
-    quickJoin.textContent = t("quickJoin");
-    quickJoin.addEventListener("click", (ev) => {
-      ev.stopPropagation();
-      joinTableFromLobby(tableState.tableId || "", "auto");
-    });
+    const actionBtn = document.createElement("button");
+    actionBtn.type = "button";
+    if (tableSimpleState === "inGame") {
+      actionBtn.textContent = t("spectate");
+      actionBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        spectateTableFromLobby(tableState.tableId || "");
+      });
+    } else if (tableSimpleState === "waiting") {
+      actionBtn.textContent = t("quickJoin");
+      actionBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        joinTableFromLobby(tableState.tableId || "", "auto");
+      });
+    } else {
+      actionBtn.disabled = true;
+      actionBtn.textContent = t("tableStateSimple.finished");
+    }
     const spacer = document.createElement("div");
     spacer.className = "muted";
     spacer.textContent = "";
     actions.appendChild(spacer);
-    actions.appendChild(quickJoin);
+    actions.appendChild(actionBtn);
     node.appendChild(actions);
 
     el.tablesList.appendChild(node);
@@ -1744,7 +1793,7 @@ function render() {
   renderSceneVisibility();
   const s = state.session;
   el.sessionInfo.textContent = s
-    ? tf("sessionSummary", s)
+    ? tf(isObserverSession(s) ? "sessionSummaryObserver" : "sessionSummary", s)
     : t("noSessionYet");
   el.promptInfo.textContent = state.prompt || "";
   const legalActions = state.expect?.legalActions || [];
@@ -1887,7 +1936,9 @@ function render() {
     renderCache.historySig = nextHistorySig;
   }
 
-  const cards = state.privateView?.handCards || [];
+  const caps = resolveViewCapabilities();
+  const isObserver = caps.isObserver;
+  const cards = isObserver ? [] : (state.privateView?.handCards || []);
   const tributeGhost = shouldShowTributeGhost(table, mySeat);
   const nextPrivateHandContentSig = privateHandContentSignature(cards, tributeGhost?.card || "");
   if (nextPrivateHandContentSig !== renderCache.privateHandContentSig) {
@@ -1896,6 +1947,7 @@ function render() {
     renderCache.privateHandSelectionSig = null;
   }
   syncPrivateHandSelection();
+  el.privateHandArea?.classList.toggle("hidden", !caps.showPrivateHand);
 
   const canReady = canCurrentPlayerAct("ready");
   const legalActionsSet = new Set(legalActions);
@@ -1923,10 +1975,10 @@ function render() {
   el.tributeBtn.disabled = !canTribute;
   el.returnCardBtn.disabled = !canReturnCard;
 
-  el.playBtn.classList.toggle("hidden", !canPlay);
-  el.passBtn.classList.toggle("hidden", !canPass);
-  el.tributeRow.classList.toggle("hidden", !canTribute);
-  el.returnRow.classList.toggle("hidden", !canReturnCard);
+  el.playBtn.classList.toggle("hidden", !caps.canOperate || !canPlay);
+  el.passBtn.classList.toggle("hidden", !caps.canOperate || !canPass);
+  el.tributeRow.classList.toggle("hidden", !caps.canOperate || !canTribute);
+  el.returnRow.classList.toggle("hidden", !caps.canOperate || !canReturnCard);
   lastLayoutRenderKey = computeLayoutRenderKey();
 }
 

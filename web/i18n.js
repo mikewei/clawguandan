@@ -59,6 +59,9 @@
         "This seat is no longer available. Try auto-join this table instead?",
       noTables: "No tables",
       quickJoin: "Quick join",
+      spectate: "Spectate",
+      spectating: "Spectating",
+      observerReadonlyHint: "Observer mode: read-only view",
       tableCardBadge: "{status}",
       tableCardSeq: "",
       tableInitialRank: "Initial rank {rank}",
@@ -95,6 +98,8 @@
         "{tableId} status={status} phase={phase} seq={seq} | {summary}",
       sessionSummary:
         "tableId={tableId}, playerId={playerId}, playerName={playerName}, lastAppliedSeq={lastAppliedSeq}",
+      sessionSummaryObserver:
+        "tableId={tableId}, mode=observer, lastAppliedSeq={lastAppliedSeq}",
       expectSummary: "expect.kind={kind}, actor={actor}, legal={legal}",
       tableMeta: "Table {tableId} | {status}",
       topPlaySummary:
@@ -171,6 +176,9 @@
       seatTakenAutoJoinConfirm: "该座位已不可用，是否改为自动加入该牌桌？",
       noTables: "暂无牌桌",
       quickJoin: "快速加入",
+      spectate: "观战",
+      spectating: "观战中",
+      observerReadonlyHint: "观战模式：只读视图",
       tableCardBadge: "{status}",
       tableCardSeq: "",
       tableInitialRank: "初始级别 {rank}",
@@ -207,6 +215,8 @@
         "{tableId} 状态={status} 阶段={phase} 序列={seq} | {summary}",
       sessionSummary:
         "tableId={tableId}, playerId={playerId}, playerName={playerName}, lastAppliedSeq={lastAppliedSeq}",
+      sessionSummaryObserver:
+        "tableId={tableId}, mode=observer, lastAppliedSeq={lastAppliedSeq}",
       expectSummary: "expect.kind={kind}, actor={actor}, legal={legal}",
       tableMeta: "牌桌 {tableId} | {status}",
       topPlaySummary:

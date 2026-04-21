@@ -693,6 +693,89 @@ async fn snapshot_private_visibility() {
 }
 
 #[tokio::test]
+async fn nextstate_observer_has_prompt_and_no_private() {
+    let app = app_with_store(TableStore::new());
+    let (app, table_id, pids, keys, seq) = create_ready_table(app).await;
+    assert!(seq >= 1);
+
+    let observer_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=100",
+                    table_id,
+                    seq - 1
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(observer_res.status(), StatusCode::OK);
+    let observer_body = read_json(observer_res).await;
+    assert!(observer_body.get("private").is_none());
+    assert!(observer_body["prompt"].as_str().is_some_and(|s| !s.is_empty()));
+
+    let pid = &pids[0];
+    let pkey = keys.get(pid).unwrap();
+    let player_res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=100&playerId={}&playerKey={}",
+                    table_id,
+                    seq - 1,
+                    pid,
+                    pkey
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(player_res.status(), StatusCode::OK);
+    let player_body = read_json(player_res).await;
+    assert!(player_body.get("private").is_some());
+    assert!(player_body["prompt"].as_str().is_some_and(|s| !s.is_empty()));
+}
+
+#[tokio::test]
+async fn nextstate_observer_head_timeout_returns_204_with_headers() {
+    let app = app_with_store(TableStore::new());
+    let (app, table_id, _pids, _keys, seq) = create_ready_table(app).await;
+    let exp_seq = seq.to_string();
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!(
+                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=1",
+                    table_id, seq
+                ))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        res.headers()
+            .get("x-table-seq")
+            .and_then(|h| h.to_str().ok()),
+        Some(exp_seq.as_str())
+    );
+    assert_eq!(
+        res.headers()
+            .get("x-table-lag")
+            .and_then(|h| h.to_str().ok()),
+        Some("0")
+    );
+}
+
+#[tokio::test]
 async fn join_returns_player_key() {
     let app = app_with_store(TableStore::new());
     let res = app
