@@ -3,24 +3,30 @@ use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(test)]
+use std::collections::HashSet;
+#[cfg(test)]
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
 use url::Url;
-use uuid::Uuid;
 
+use clawguandan::bot::plugins::{BeatItPlugin, RuleBotPlugin};
+use clawguandan::bot::{BotRunOptions, run_bot_subprocess};
 use clawguandan::domain::{
     NextStateBody, PrivateView, TableState, TableStatus, apply_transition_delta_to_table_state,
 };
+#[cfg(test)]
 use clawguandan::game::engine::PlayerAction;
-use clawguandan::simulation::run_cli_command;
 use clawguandan::web_assets::rules_markdown;
 
 fn config_dir() -> PathBuf {
@@ -584,6 +590,24 @@ pub(crate) enum BotCmd {
         #[arg(short, long)]
         verbose: bool,
     },
+    /// Run rule-based bots via subprocess runtime. Optionally target an existing table; otherwise create one.
+    RuleBot {
+        /// Optional existing table ID to join. If omitted, creates a fresh table.
+        #[arg(short = 't', long)]
+        table: Option<String>,
+        /// Starting rank/level for table creation (2-10, J, Q, K, A). Only valid when creating a new table.
+        #[arg(long)]
+        rank: Option<String>,
+        /// Number of bots to join. If omitted, auto-fills all current vacancies.
+        #[arg(long)]
+        players: Option<u8>,
+        /// Number of hands to complete (each ends in scoring)
+        #[arg(long, default_value_t = 1)]
+        hands: u32,
+        /// Print every subprocess command and its stdout/stderr (default: compact logs only)
+        #[arg(short, long)]
+        verbose: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -875,6 +899,13 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 hands,
                 verbose,
             } => simulate_cliplay_subprocess(table, rank, players, hands, verbose),
+            BotCmd::RuleBot {
+                table,
+                rank,
+                players,
+                hands,
+                verbose,
+            } => simulate_rule_bot_subprocess(table, rank, players, hands, verbose),
         },
         Top::Show { cmd } => match cmd {
             ShowCmd::Rules { lang } => {
@@ -2053,17 +2084,22 @@ fn play_action(
     }
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn parse_cli_stdout_json(out: &[u8]) -> Result<serde_json::Value, String> {
     let s = String::from_utf8_lossy(out);
     let t = s.trim();
     serde_json::from_str(t).map_err(|e| format!("invalid JSON from CLI: {e}; got: {t:?}"))
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn nextstate_stdout_is_no_content(stdout: &[u8]) -> bool {
     let t = String::from_utf8_lossy(stdout).trim().to_string();
     t.is_empty() || t.starts_with("(no new transition within timeout)")
 }
 
+#[cfg(test)]
 fn transition_counts_as_hand_done(v: &serde_json::Value) -> bool {
     matches!(
         v.get("type").and_then(|x| x.as_str()),
@@ -2071,6 +2107,8 @@ fn transition_counts_as_hand_done(v: &serde_json::Value) -> bool {
     )
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn table_state_is_terminal(v: &serde_json::Value) -> bool {
     v.get("status").and_then(|x| x.as_str()) == Some("finished")
         || v.get("expect")
@@ -2079,6 +2117,8 @@ fn table_state_is_terminal(v: &serde_json::Value) -> bool {
             == Some("game_over")
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn expect_requires_action(state: &serde_json::Value, my_pid: &str) -> bool {
     let expect = state.get("expect").unwrap_or(&serde_json::Value::Null);
     let kind = expect.get("kind").and_then(|x| x.as_str()).unwrap_or("");
@@ -2096,6 +2136,7 @@ fn expect_requires_action(state: &serde_json::Value, my_pid: &str) -> bool {
     }
 }
 
+#[cfg(test)]
 fn expect_has_uncontrolled_actor(
     expect: &serde_json::Value,
     controlled_pids: &HashSet<String>,
@@ -2118,6 +2159,8 @@ fn expect_has_uncontrolled_actor(
     None
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 fn player_action_to_cli_argv_auto(
     action: &PlayerAction,
     table_id: &str,
@@ -2324,6 +2367,8 @@ mod tests {
     }
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 struct CliplayShared {
     stop: AtomicBool,
     start_seq: u64,
@@ -2333,6 +2378,8 @@ struct CliplayShared {
     err: Mutex<Option<String>>,
 }
 
+#[cfg(test)]
+#[allow(dead_code)]
 impl CliplayShared {
     fn fail(&self, msg: String) {
         let mut e = self.err.lock().unwrap();
@@ -2385,6 +2432,7 @@ impl CliplayShared {
 }
 
 /// Last `/narration` replace in a `nextstate` JSON body (flattened transition).
+#[cfg(test)]
 fn beat_it_last_narration_from_nextstate_json(v: &Value) -> Option<String> {
     let ops = v.get("delta")?.get("ops")?.as_array()?;
     let mut out: Option<String> = None;
@@ -2404,6 +2452,7 @@ fn beat_it_last_narration_from_nextstate_json(v: &Value) -> Option<String> {
 }
 
 /// Narration is often bilingual JSON `{"zh":...,"en":...}` as a string; prefer `en` for CLI.
+#[cfg(test)]
 fn beat_it_narration_display_en(raw: &str) -> String {
     let t = raw.trim();
     if t.is_empty() {
@@ -2424,546 +2473,35 @@ fn simulate_cliplay_subprocess(
     hands: u32,
     verbose: bool,
 ) -> Result<(), String> {
-    if hands == 0 {
-        return Err("--hands must be >= 1".into());
-    }
-    if let Some(n) = players
-        && n > 4
-    {
-        return Err("--players must be <= 4".into());
-    }
-    let bin = std::env::current_exe().map_err(|e| e.to_string())?;
-
-    if verbose {
-        println!("--- bot beat-it: hands={hands} (observer + bots; subprocess CLI; auto-seq) ---");
-    } else {
-        println!(
-            "--- bot beat-it: hands={hands} (compact log; use -v for subprocess I/O) ---"
-        );
-    }
-
-    let table_id = if let Some(tid) = table {
-        if rank.is_some() {
-            return Err("--rank is only allowed when creating a new table (omit --table)".into());
-        }
-        if verbose {
-            println!("\n### [table target]\nusing existing table: {tid}");
-        } else {
-            println!("--- bot beat-it: using existing table_id={tid} ---");
-        }
-        tid
-    } else {
-        let label = "table create";
-        let mut create_args = vec![
-            "table".to_string(),
-            "create".to_string(),
-            "bot-beat-it".to_string(),
-        ];
-        if let Some(rank) = rank.as_deref() {
-            create_args.push("--rank".to_string());
-            create_args.push(rank.to_string());
-        }
-        if verbose {
-            println!("\n### [{label}]\n$ clawguandan {}", create_args.join(" "));
-        }
-        let out = run_cli_command(&bin, &create_args).map_err(|e| e.to_string())?;
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        if verbose {
-            println!("<< stdout:\n{stdout}");
-        }
-        let create_v = parse_cli_stdout_json(&out.stdout)?;
-        let tid = create_v["tableId"]
-            .as_str()
-            .or_else(|| create_v["table_id"].as_str())
-            .ok_or_else(|| "create: missing tableId".to_string())?
-            .to_string();
-        if !verbose {
-            println!("--- bot beat-it: created table_id={tid} ---");
-        }
-        tid
-    };
-
-    let snapshot_args = vec![
-        "table".to_string(),
-        "snapshot".to_string(),
-        "-t".to_string(),
-        table_id.clone(),
-    ];
-    if verbose {
-        println!(
-            "\n### [table snapshot]\n$ clawguandan {}",
-            snapshot_args.join(" ")
-        );
-    }
-    let snapshot_out = run_cli_command(&bin, &snapshot_args).map_err(|e| e.to_string())?;
-    let snapshot_stdout = String::from_utf8_lossy(&snapshot_out.stdout);
-    if verbose {
-        println!("<< stdout:\n{snapshot_stdout}");
-    }
-    let snapshot = parse_cli_stdout_json(&snapshot_out.stdout)?;
-    let snapshot_state: TableState =
-        serde_json::from_value(snapshot.clone()).map_err(|e| format!("snapshot parse: {e}"))?;
-    let start_seq = snapshot_state.seq;
-    let seats = snapshot["seats"]
-        .as_object()
-        .ok_or_else(|| "snapshot: missing seats".to_string())?;
-    let occupied = seats
-        .values()
-        .filter(|seat| {
-            seat.get("playerId")
-                .and_then(|x| x.as_str())
-                .map(|x| !x.is_empty())
-                .unwrap_or(false)
-        })
-        .count();
-    if occupied > 4 {
-        return Err(format!(
-            "snapshot: invalid occupied seat count {occupied} (>4)"
-        ));
-    }
-    let vacancy = 4usize.saturating_sub(occupied);
-    let target_join = if let Some(n) = players {
-        usize::from(n)
-    } else {
-        vacancy
-    };
-    if players.is_none() && vacancy == 0 {
-        return Err(
-            "no seat vacancy: omit `--table` to create a new table, or pass `--players` explicitly"
-                .into(),
-        );
-    }
-    if target_join > vacancy {
-        return Err(format!(
-            "requested --players {target_join}, but only {vacancy} seat(s) are available on table {table_id}"
-        ));
-    }
-    println!(
-        "--- bot beat-it: table_id={table_id} occupied={occupied} vacancy={vacancy} join_bots={target_join} ---"
-    );
-
-    // Per-run observer session name so we do not read/write `observer.default` (user tooling)
-    // or clash with another concurrent beat-it on the same host/table.
-    let observer_name = {
-        let s = Uuid::new_v4().to_string();
-        let frag = s
-            .split('-')
-            .next()
-            .expect("uuid v4 string is hyphenated");
-        format!("bi{frag}")
-    };
-    validate_session_id_component(&observer_name, "observer_name")?;
-    println!("--- bot beat-it: observer_session={observer_name} ---");
-
-    let last_narration_raw: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    if !verbose {
-        let raw = snapshot_state.narration.trim();
-        if !raw.is_empty() {
-            let line = beat_it_narration_display_en(raw);
-            if !line.is_empty() {
-                println!("[narration] {line}");
-                *last_narration_raw.lock().unwrap() = Some(raw.to_string());
-            }
-        }
-    }
-
-    // Bootstrap observer auto-seq at current head so we do not replay historical scoring
-    // transitions from any prior materialized state under this session name.
-    let base = load_active_server_base()?;
-    write_observer_session(
-        &base,
-        &table_id,
-        &observer_name,
-        &PlayerSession {
-            version: 1,
-            last_applied_seq: start_seq,
-            table_state: Some(snapshot_state.clone()),
-            private_view: None,
+    run_bot_subprocess(
+        BotRunOptions {
+            table,
+            rank,
+            players,
+            hands,
+            verbose,
         },
-    )?;
+        Arc::new(BeatItPlugin),
+    )
+}
 
-    let mut pids: Vec<String> = Vec::new();
-    for i in 0..target_join {
-        let label = format!("table join bot{i}");
-        let args = vec![
-            "table".to_string(),
-            "join".to_string(),
-            "-t".to_string(),
-            table_id.clone(),
-            "--name".to_string(),
-            format!("bot{i}"),
-            "--seat".to_string(),
-            "auto".to_string(),
-        ];
-        if verbose {
-            println!("\n### [{label}]\n$ clawguandan {}", args.join(" "));
-        }
-        let out = run_cli_command(&bin, &args).map_err(|e| e.to_string())?;
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        if verbose {
-            println!("<< stdout:\n{stdout}");
-        }
-        let j = parse_cli_stdout_json(&out.stdout)?;
-        let pid = j["playerId"]
-            .as_str()
-            .ok_or_else(|| "join: missing playerId".to_string())?
-            .to_string();
-        pids.push(pid);
-    }
-    if !verbose && !pids.is_empty() {
-        println!(
-            "--- bot beat-it: joined {} bot(s), sent ready ---",
-            pids.len()
-        );
-    }
-
-    for (i, pid) in pids.iter().enumerate() {
-        let label = format!("play ready bot{i}");
-        let args = vec![
-            "play".to_string(),
-            "ready".to_string(),
-            "-t".to_string(),
-            table_id.clone(),
-            "-p".to_string(),
-            pid.clone(),
-        ];
-        if verbose {
-            println!("\n### [{label}]\n$ clawguandan {}", args.join(" "));
-        }
-        let out = run_cli_command(&bin, &args).map_err(|e| e.to_string())?;
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        if verbose {
-            println!("<< stdout:\n{stdout}");
-        }
-        let _j = parse_cli_stdout_json(&out.stdout)?;
-    }
-
-    let controlled_pids: Arc<HashSet<String>> = Arc::new(pids.iter().cloned().collect());
-    let controlled_pids_text = pids.join(",");
-
-    let shared = Arc::new(CliplayShared {
-        stop: AtomicBool::new(false),
-        start_seq,
-        last_scoring_transition_seq: Mutex::new(None),
-        hands_done: AtomicU32::new(0),
-        hands_target: hands,
-        err: Mutex::new(None),
-    });
-
-    // Keep below http_client() timeout so long-poll can return 200/204 before reqwest aborts.
-    const NEXTSTATE_TIMEOUT_MS: u64 = 110_000;
-    const MAX_STEPS: u64 = 500_000;
-
-    let mut handles = Vec::new();
-
-    let bin_obs = bin.clone();
-    let table_id_obs = table_id.clone();
-    let observer_name_obs = observer_name.clone();
-    let shared_obs = Arc::clone(&shared);
-    let last_narr_obs = Arc::clone(&last_narration_raw);
-    handles.push(thread::spawn(move || {
-        loop {
-            if shared_obs.stop.load(Ordering::SeqCst) {
-                break;
-            }
-            let argv = vec![
-                "table".to_string(),
-                "nextstate".to_string(),
-                "-t".to_string(),
-                table_id_obs.clone(),
-                "--observer-name".to_string(),
-                observer_name_obs.clone(),
-                "--timeout-ms".to_string(),
-                NEXTSTATE_TIMEOUT_MS.to_string(),
-            ];
-            if verbose {
-                println!("\n### [observer] $ clawguandan {}", argv.join(" "));
-            }
-            let out = match run_cli_command(&bin_obs, &argv) {
-                Ok(o) => o,
-                Err(e) => {
-                    let msg = e.to_string();
-                    if msg.contains("error sending request") || msg.contains("connection") {
-                        std::thread::sleep(Duration::from_millis(200));
-                        match run_cli_command(&bin_obs, &argv) {
-                            Ok(o) => o,
-                            Err(e2) => {
-                                shared_obs.fail(format!("observer: nextstate: {e2}"));
-                                break;
-                            }
-                        }
-                    } else {
-                        shared_obs.fail(format!("observer: nextstate: {e}"));
-                        break;
-                    }
-                }
-            };
-            let out_txt = String::from_utf8_lossy(&out.stdout);
-            let err_txt = String::from_utf8_lossy(&out.stderr);
-            if verbose {
-                println!("<< [observer] stdout:\n{out_txt}");
-                if !err_txt.trim().is_empty() {
-                    println!("<< [observer] stderr:\n{err_txt}");
-                }
-            }
-
-            if nextstate_stdout_is_no_content(&out.stdout) {
-                continue;
-            }
-
-            let v = match parse_cli_stdout_json(&out.stdout) {
-                Ok(j) => j,
-                Err(e) => {
-                    shared_obs.fail(format!("observer: {e}"));
-                    break;
-                }
-            };
-            if !verbose {
-                if let Some(raw) = beat_it_last_narration_from_nextstate_json(&v) {
-                    let mut g = last_narr_obs.lock().unwrap();
-                    let changed = g.as_ref().map(|s| s.as_str()) != Some(raw.as_str());
-                    if changed {
-                        let disp = beat_it_narration_display_en(&raw);
-                        if !disp.is_empty() {
-                            println!("[narration] {disp}");
-                        }
-                        *g = Some(raw);
-                    }
-                }
-            }
-            shared_obs.on_transition_maybe_scoring(&v);
-            shared_obs.on_transition_maybe_terminal(&v);
-            if shared_obs.stop.load(Ordering::SeqCst) {
-                break;
-            }
-        }
-    }));
-
-    for (i, pid) in pids.iter().cloned().enumerate() {
-        let bin = bin.clone();
-        let table_id = table_id.clone();
-        let shared = Arc::clone(&shared);
-        let controlled_pids = Arc::clone(&controlled_pids);
-        let controlled_pids_text = controlled_pids_text.clone();
-        let prefix = format!("bot{i}");
-        let verbose_bot = verbose;
-        handles.push(thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(50 * i as u64));
-            let mut steps: u64 = 0;
-            loop {
-                if shared.stop.load(Ordering::SeqCst) {
-                    break;
-                }
-                if steps >= MAX_STEPS {
-                    shared.fail(format!(
-                        "{prefix}: exceeded max steps ({MAX_STEPS}); possible livelock"
-                    ));
-                    break;
-                }
-                steps += 1;
-
-                let argv = vec![
-                    "play".to_string(),
-                    "wait4myturn".to_string(),
-                    "-t".to_string(),
-                    table_id.clone(),
-                    "-p".to_string(),
-                    pid.clone(),
-                    "--timeout-ms".to_string(),
-                    NEXTSTATE_TIMEOUT_MS.to_string(),
-                ];
-                if verbose_bot {
-                    println!(
-                        "\n### [{prefix}] $ clawguandan {}",
-                        argv.join(" ")
-                    );
-                }
-                let out = match run_cli_command(&bin, &argv) {
-                    Ok(o) => o,
-                    Err(e) => {
-                        let msg = e.to_string();
-                        if msg.contains("error sending request") || msg.contains("connection") {
-                            std::thread::sleep(Duration::from_millis(200));
-                            match run_cli_command(&bin, &argv) {
-                                Ok(o) => o,
-                                Err(e2) => {
-                                    shared.fail(format!("{prefix}: wait4myturn: {e2}"));
-                                    break;
-                                }
-                            }
-                        } else {
-                            shared.fail(format!("{prefix}: wait4myturn: {e}"));
-                            break;
-                        }
-                    }
-                };
-                let out_txt = String::from_utf8_lossy(&out.stdout);
-                let err_txt = String::from_utf8_lossy(&out.stderr);
-                if verbose_bot {
-                    println!("<< [{prefix}] stdout:\n{out_txt}");
-                    if !err_txt.trim().is_empty() {
-                        println!("<< [{prefix}] stderr:\n{err_txt}");
-                    }
-                }
-
-                let state = match parse_cli_stdout_json(&out.stdout) {
-                    Ok(j) => j,
-                    Err(e) => {
-                        shared.fail(format!("{prefix}: {e}"));
-                        break;
-                    }
-                };
-
-                if table_state_is_terminal(&state) {
-                    shared.stop.store(true, Ordering::SeqCst);
-                    break;
-                }
-
-                let expect = match state.get("expect") {
-                    Some(e) => e.clone(),
-                    None => {
-                        shared.fail(format!("{prefix}: wait4myturn: missing expect"));
-                        break;
-                    }
-                };
-                let kind = expect.get("kind").and_then(|x| x.as_str()).unwrap_or("");
-                if let Some(actor) = expect_has_uncontrolled_actor(&expect, &controlled_pids) {
-                    shared.fail(format!(
-                        "{prefix}: actor {actor} is not controlled by bot beat-it (join_only mode). controlled_bot_ids=[{controlled_pids_text}]"
-                    ));
-                    break;
-                }
-
-                if expect_requires_action(&state, &pid) {
-                    if kind == "ready" {
-                        let argv = vec![
-                            "play".to_string(),
-                            "ready".to_string(),
-                            "-t".to_string(),
-                            table_id.clone(),
-                            "-p".to_string(),
-                            pid.clone(),
-                        ];
-                        if verbose_bot {
-                            println!(
-                                "\n### [{prefix}] $ clawguandan {}",
-                                argv.join(" ")
-                            );
-                        }
-                        match run_cli_command(&bin, &argv) {
-                            Ok(o) => {
-                                if verbose_bot {
-                                    println!(
-                                        "<< [{prefix}] stdout:\n{}",
-                                        String::from_utf8_lossy(&o.stdout)
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                shared.fail(format!("{prefix}: ready: {e}"));
-                                break;
-                            }
-                        }
-                    } else {
-                        let sargv = vec![
-                            "play".to_string(),
-                            "suggest".to_string(),
-                            "-t".to_string(),
-                            table_id.clone(),
-                            "-p".to_string(),
-                            pid.clone(),
-                        ];
-                        if verbose_bot {
-                            println!(
-                                "\n### [{prefix}] $ clawguandan {}",
-                                sargv.join(" ")
-                            );
-                        }
-                        let sug_out = match run_cli_command(&bin, &sargv) {
-                            Ok(o) => o,
-                            Err(e) => {
-                                shared.fail(format!("{prefix}: suggest: {e}"));
-                                break;
-                            }
-                        };
-                        if verbose_bot {
-                            println!(
-                                "<< [{prefix}] stdout:\n{}",
-                                String::from_utf8_lossy(&sug_out.stdout)
-                            );
-                        }
-                        let sug = match parse_cli_stdout_json(&sug_out.stdout) {
-                            Ok(j) => j,
-                            Err(e) => {
-                                shared.fail(format!("{prefix}: {e}"));
-                                break;
-                            }
-                        };
-                        let action_type = match sug.get("actionType").and_then(|x| x.as_str()) {
-                            Some(s) => s,
-                            None => {
-                                shared.fail(format!("{prefix}: suggest: missing actionType"));
-                                break;
-                            }
-                        };
-                        let payload = sug.get("payload").cloned().unwrap_or(json!({}));
-                        let action = match PlayerAction::try_from_action_type_payload(
-                            action_type,
-                            &payload,
-                        ) {
-                            Ok(a) => a,
-                            Err(e) => {
-                                shared.fail(format!("{prefix}: suggest parse: {e}"));
-                                break;
-                            }
-                        };
-                        let argv = player_action_to_cli_argv_auto(&action, &table_id, &pid);
-                        if verbose_bot {
-                            println!(
-                                "\n### [{prefix}] $ clawguandan {}",
-                                argv.join(" ")
-                            );
-                        }
-                        match run_cli_command(&bin, &argv) {
-                            Ok(o) => {
-                                if verbose_bot {
-                                    println!(
-                                        "<< [{prefix}] stdout:\n{}",
-                                        String::from_utf8_lossy(&o.stdout)
-                                    );
-                                }
-                            }
-                            Err(e) => {
-                                shared.fail(format!("{prefix}: action: {e}"));
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if shared.stop.load(Ordering::SeqCst) {
-                    break;
-                }
-            }
-        }));
-    }
-
-    for h in handles {
-        h.join()
-            .map_err(|_| "bot beat-it: thread panicked".to_string())?;
-    }
-
-    if let Some(e) = shared.err.lock().unwrap().take() {
-        return Err(e);
-    }
-
-    let base = load_active_server_base()?;
-    let last_seq =
-        read_session_last_applied_seq_observer(&base, &table_id, &observer_name)?.unwrap_or(0);
-    println!(
-        "\n=== bot beat-it done. table_id={table_id} observer_name={observer_name} observer_last_seq={last_seq} ==="
-    );
-    Ok(())
+fn simulate_rule_bot_subprocess(
+    table: Option<String>,
+    rank: Option<String>,
+    players: Option<u8>,
+    hands: u32,
+    verbose: bool,
+) -> Result<(), String> {
+    run_bot_subprocess(
+        BotRunOptions {
+            table,
+            rank,
+            players,
+            hands,
+            verbose,
+        },
+        Arc::new(RuleBotPlugin::default()),
+    )
 }
 
 #[cfg(test)]

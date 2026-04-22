@@ -144,6 +144,23 @@ fn simulate_cliplay_help_includes_table_and_players_flags() {
     assert!(help.contains("--verbose") || help.contains("-v"));
 }
 
+#[test]
+fn rule_bot_help_includes_table_and_players_flags() {
+    let out = Command::new(cargo_bin())
+        .args(["bot", "rule-bot", "--help"])
+        .output()
+        .expect("bot rule-bot --help");
+    assert!(
+        out.status.success(),
+        "help failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let help = String::from_utf8_lossy(&out.stdout);
+    assert!(help.contains("--table"));
+    assert!(help.contains("--players"));
+    assert!(help.contains("--verbose") || help.contains("-v"));
+}
+
 /// Spawns a real server and runs `clawguandan bot beat-it` (slow; subprocess per step).
 #[test]
 #[ignore = "manual / CI optional: requires free port and ~minutes for one full hand"]
@@ -378,4 +395,57 @@ fn simulate_cliplay_existing_full_table_without_players_fails() {
         stderr.contains("no seat vacancy"),
         "expected no seat vacancy error, got: {stderr}"
     );
+}
+
+/// Spawns a real server and runs `clawguandan bot rule-bot` (slow; subprocess per step).
+#[test]
+#[ignore = "manual / CI optional: requires free port and ~minutes for one full hand"]
+fn simulate_rule_bot_one_hand_exits_zero() {
+    let home = std::env::temp_dir().join(format!(
+        "clawguandan_sim_rule_bot_{}",
+        std::process::id()
+    ));
+    std::fs::create_dir_all(&home).expect("temp home");
+    let home = home.as_path();
+
+    let port: u16 = 22_900 + (std::process::id() as u16 % 90);
+    let addr = "127.0.0.1";
+
+    let mut server = Command::new(cargo_bin())
+        .env("HOME", home)
+        .args(["server", "serve", "--ip", addr, "--port", &port.to_string()])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn server");
+
+    wait_port_open(addr, port, 100);
+
+    let use_out = Command::new(cargo_bin())
+        .env("HOME", home)
+        .args(["server", "use", &format!("{addr}:{port}")])
+        .output()
+        .expect("server use");
+    assert!(
+        use_out.status.success(),
+        "server use failed: {}",
+        String::from_utf8_lossy(&use_out.stderr)
+    );
+
+    let sim = Command::new(cargo_bin())
+        .env("HOME", home)
+        .args(["bot", "rule-bot", "--players", "4", "--hands", "1"])
+        .output()
+        .expect("bot rule-bot");
+
+    let _ = server.kill();
+    assert!(
+        sim.status.success(),
+        "bot rule-bot failed: stdout={} stderr={}",
+        String::from_utf8_lossy(&sim.stdout),
+        String::from_utf8_lossy(&sim.stderr)
+    );
+    let out = String::from_utf8_lossy(&sim.stdout);
+    assert!(out.contains("bot rule-bot done"));
 }

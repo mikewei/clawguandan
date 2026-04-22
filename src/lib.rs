@@ -1,6 +1,7 @@
 //! Guan Dan game server — MVP: table lifecycle, seq log, nextstate long-poll.
 
 pub mod api;
+pub mod bot;
 pub mod lan_addrs;
 pub mod domain;
 pub mod error;
