@@ -141,6 +141,7 @@ fn simulate_cliplay_help_includes_table_and_players_flags() {
     let help = String::from_utf8_lossy(&out.stdout);
     assert!(help.contains("--table"));
     assert!(help.contains("--players"));
+    assert!(help.contains("--verbose") || help.contains("-v"));
 }
 
 /// Spawns a real server and runs `clawguandan bot beat-it` (slow; subprocess per step).

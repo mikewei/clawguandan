@@ -10,6 +10,7 @@ use clawguandan::game::types::{GameConfig, GamePhase};
 use clawguandan::store::TableStore;
 use http_body_util::BodyExt;
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use tower::ServiceExt;
 
 async fn read_json(res: axum::response::Response) -> Value {
@@ -18,7 +19,9 @@ async fn read_json(res: axum::response::Response) -> Value {
     serde_json::from_slice(&bytes).unwrap()
 }
 
-async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<String>, u64) {
+async fn create_ready_table(
+    app: axum::Router,
+) -> (axum::Router, String, Vec<String>, HashMap<String, String>, u64) {
     let res = app
         .clone()
         .oneshot(
@@ -34,6 +37,7 @@ async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<Str
     let v = read_json(res).await;
     let table_id = v["tableId"].as_str().unwrap().to_string();
     let mut pids = Vec::new();
+    let mut keys = HashMap::new();
     for i in 0..4 {
         let res = app
             .clone()
@@ -54,7 +58,10 @@ async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<Str
             .await
             .unwrap();
         let body = read_json(res).await;
-        pids.push(body["playerId"].as_str().unwrap().to_string());
+        let pid = body["playerId"].as_str().unwrap().to_string();
+        let pkey = body["playerKey"].as_str().unwrap().to_string();
+        keys.insert(pid.clone(), pkey);
+        pids.push(pid);
     }
     let mut seq = 0u64;
     for pid in &pids {
@@ -66,7 +73,12 @@ async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<Str
                     .uri(format!("/api/v1/tables/{}/ready", table_id))
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        json!({"playerId": pid, "ready": true}).to_string(),
+                        json!({
+                            "playerId": pid,
+                            "playerKey": keys.get(pid).unwrap(),
+                            "ready": true,
+                        })
+                        .to_string(),
                     ))
                     .unwrap(),
             )
@@ -75,14 +87,14 @@ async fn create_ready_table(app: axum::Router) -> (axum::Router, String, Vec<Str
         let body = read_json(res).await;
         seq = body["newSeq"].as_u64().unwrap();
     }
-    (app, table_id, pids, seq)
+    (app, table_id, pids, keys, seq)
 }
 
 #[tokio::test]
 async fn full_hand_four_players_until_scoring() {
     let store = TableStore::new();
     let app = app_with_store(store.clone());
-    let (app, table_id, pids, seq) = create_ready_table(app).await;
+    let (app, table_id, pids, keys, seq) = create_ready_table(app).await;
 
     let snap = store.get_snapshot(&table_id).await.unwrap();
     store
@@ -98,6 +110,7 @@ async fn full_hand_four_players_until_scoring() {
 
     // Seats: E,S,W,N == pids[0..4].
     let e = &pids[0];
+    let e_key = keys.get(e).expect("E player key");
 
     // Build a deterministic scoring state: E has one card, W already empty.
     // E plays out -> EW both empty -> scoring.
@@ -136,6 +149,7 @@ async fn full_hand_four_players_until_scoring() {
                 .body(Body::from(
                     json!({
                         "playerId": e,
+                        "playerKey": e_key,
                         "seq": seq,
                         "cards": ["♠3"]
                     })
@@ -155,8 +169,8 @@ async fn full_hand_four_players_until_scoring() {
             Request::builder()
                 .method("GET")
                 .uri(format!(
-                    "/api/v1/tables/{}/snapshot?playerId={}",
-                    table_id, e
+                    "/api/v1/tables/{}/snapshot?playerId={}&playerKey={}",
+                    table_id, e, e_key
                 ))
                 .body(Body::empty())
                 .unwrap(),
@@ -196,7 +210,12 @@ async fn full_hand_four_players_until_scoring() {
                     .uri(format!("/api/v1/tables/{}/ready", table_id))
                     .header("content-type", "application/json")
                     .body(Body::from(
-                        json!({"playerId": pid, "ready": true}).to_string(),
+                        json!({
+                            "playerId": pid,
+                            "playerKey": keys.get(pid.as_str()).unwrap(),
+                            "ready": true,
+                        })
+                        .to_string(),
                     ))
                     .unwrap(),
             )
@@ -212,8 +231,8 @@ async fn full_hand_four_players_until_scoring() {
                     Request::builder()
                         .method("GET")
                         .uri(format!(
-                            "/api/v1/tables/{}/snapshot?playerId={}",
-                            table_id, e
+                            "/api/v1/tables/{}/snapshot?playerId={}&playerKey={}",
+                            table_id, e, e_key
                         ))
                         .body(Body::empty())
                         .unwrap(),
@@ -232,8 +251,8 @@ async fn full_hand_four_players_until_scoring() {
             Request::builder()
                 .method("GET")
                 .uri(format!(
-                    "/api/v1/tables/{}/snapshot?playerId={}",
-                    table_id, e
+                    "/api/v1/tables/{}/snapshot?playerId={}&playerKey={}",
+                    table_id, e, e_key
                 ))
                 .body(Body::empty())
                 .unwrap(),
@@ -245,5 +264,11 @@ async fn full_hand_four_players_until_scoring() {
     assert_eq!(next_snap["phase"], "tribute");
     assert_eq!(next_snap["expect"]["kind"], "tribute");
     assert_eq!(next_snap["seq"], json!(seq_after_scoring));
-    assert_eq!(next_snap["narration"], "");
+    let nar = next_snap["narration"].as_str().expect("narration");
+    let parsed: Value = serde_json::from_str(nar).expect("bilingual narration JSON");
+    let zh = parsed["zh"].as_str().expect("zh");
+    assert!(
+        zh.contains("本局庄家方") && zh.contains("打"),
+        "unexpected opening narration: {zh:?}"
+    );
 }

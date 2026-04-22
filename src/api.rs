@@ -1,4 +1,5 @@
 use crate::domain::{Phase, PlayerType, PrivateView, TableState, TableStatus};
+use crate::lan_addrs::lan_http_base_urls;
 use crate::error::AppError;
 use crate::game::rules::scoring::Level;
 use crate::game::types::GamePhase;
@@ -13,10 +14,26 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde::Serialize;
+use std::net::IpAddr;
 
 #[derive(Clone)]
 pub struct AppState {
     pub store: TableStore,
+    /// TCP listen port (for `/ping` `lanWebUrls`, LAN first then WAN).
+    pub listen_port: u16,
+    /// Address passed to `bind(2)` (e.g. `0.0.0.0` expands to interface LAN IPv4s).
+    pub bind_ip: IpAddr,
+}
+
+impl AppState {
+    /// Router tests: loopback bind ⇒ empty `lanWebUrls`.
+    pub fn for_tests(store: TableStore) -> Self {
+        Self {
+            store,
+            listen_port: 22_222,
+            bind_ip: std::net::Ipv4Addr::LOCALHOST.into(),
+        }
+    }
 }
 
 pub fn router(state: AppState) -> Router {
@@ -46,11 +63,14 @@ pub fn router(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn ping() -> Json<serde_json::Value> {
+async fn ping(State(state): State<AppState>) -> Json<serde_json::Value> {
+    // Backward-compatible field name. Values may include WAN URLs after LAN URLs.
+    let lan_web_urls = lan_http_base_urls(state.listen_port, state.bind_ip);
     Json(serde_json::json!({
         "pong": "clawguandan",
         "ver": env!("CARGO_PKG_VERSION"),
         "pid": std::process::id(),
+        "lanWebUrls": lan_web_urls,
     }))
 }
 
@@ -528,9 +548,7 @@ async fn nextstate_inner(
 }
 
 pub fn app() -> Router {
-    router(AppState {
-        store: TableStore::new(),
-    })
+    router(AppState::for_tests(TableStore::new()))
 }
 
 #[derive(Debug, Deserialize)]
@@ -591,5 +609,5 @@ async fn snapshot(
 
 /// Test helper: router with injected store.
 pub fn app_with_store(store: TableStore) -> Router {
-    router(AppState { store })
+    router(AppState::for_tests(store))
 }

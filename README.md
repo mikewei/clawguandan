@@ -18,8 +18,9 @@ cargo run --bin clawguandan -- table create "Friday"
 cargo run --bin clawguandan -- table create "Friday" --rank 8
 cargo run --bin clawguandan -- table join -t <tableId> --name Alice --seat auto
 cargo run --bin clawguandan -- table join -t <tableId> --name Bot-S --type ai --model gpt-4o --seat auto
-# join 会下发 playerKey，CLI 自动写入同会话目录下的 auth.json（无需手填）
-# 先 `table nextstate` 同步 lastAppliedSeq（写入 session.json），再 `play ready`（auto-seq + auto playerKey）
+# join 会下发 playerKey，CLI 写入 `$TMPDIR/clawguandan/<hostPortKey>/<tableId>/<playerId>/auth.json`
+# 先 `table nextstate` 同步 lastAppliedSeq（写入同目录 `session.json`），再 `play ready`（auto-seq + auto playerKey）
+# 观战无 `-p` 时会话在 `.../<tableId>/observer.<name>/session.json`；`--observer-name` 仅此时可用（与 `-p` 互斥），省略时名为 default
 cargo run --bin clawguandan -- table nextstate -t <tableId> -p <playerId>
 cargo run --bin clawguandan -- play ready -t <tableId> -p <playerId>
 # 如需显式覆盖，也可传 --player-key/-k

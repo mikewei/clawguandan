@@ -3,7 +3,7 @@ use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -14,6 +14,7 @@ use std::thread;
 use std::time::Duration;
 
 use url::Url;
+use uuid::Uuid;
 
 use clawguandan::domain::{
     NextStateBody, PrivateView, TableState, TableStatus, apply_transition_delta_to_table_state,
@@ -40,9 +41,8 @@ struct CliConfig {
     server_url: Option<String>,
 }
 
-/// Per-session CLI state under `std::env::temp_dir()/clawguandan/<session_key>/session.json`:
-/// - Players: `<session_key> = <hostPortKey>.<table_id>.<player_id>` (`hostPortKey` derived from `server_url`)
-/// - Observers: `<session_key> = <hostPortKey>.<table_id>.observer`
+/// Per-session CLI state under `std::env::temp_dir()/clawguandan/` (see `player_session_dir` /
+/// `observer_session_dir`). `hostPortKey` is derived from the active `server_url`.
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 struct PlayerSession {
@@ -128,12 +128,48 @@ fn validate_session_id_component(s: &str, name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn session_json_path(session_key: &str) -> PathBuf {
-    session_state_root().join(session_key).join("session.json")
+fn player_session_dir(base: &str, table_id: &str, player_id: &str) -> Result<PathBuf, String> {
+    let sid = session_host_port_key_from_base(base)?;
+    validate_session_id_component(table_id, "table_id")?;
+    validate_session_id_component(player_id, "player_id")?;
+    Ok(session_state_root()
+        .join(sid)
+        .join(table_id)
+        .join(player_id))
 }
 
-fn auth_json_path(session_key: &str) -> PathBuf {
-    session_state_root().join(session_key).join("auth.json")
+fn observer_session_dir(
+    base: &str,
+    table_id: &str,
+    observer_name: &str,
+) -> Result<PathBuf, String> {
+    let sid = session_host_port_key_from_base(base)?;
+    validate_session_id_component(table_id, "table_id")?;
+    let name = observer_name.trim();
+    if name.is_empty() {
+        return Err("invalid observer_name: empty".into());
+    }
+    validate_session_id_component(name, "observer_name")?;
+    Ok(session_state_root()
+        .join(sid)
+        .join(table_id)
+        .join(format!("observer.{name}")))
+}
+
+fn player_session_json_path(base: &str, table_id: &str, player_id: &str) -> Result<PathBuf, String> {
+    Ok(player_session_dir(base, table_id, player_id)?.join("session.json"))
+}
+
+fn player_auth_json_path(base: &str, table_id: &str, player_id: &str) -> Result<PathBuf, String> {
+    Ok(player_session_dir(base, table_id, player_id)?.join("auth.json"))
+}
+
+fn observer_session_json_path(
+    base: &str,
+    table_id: &str,
+    observer_name: &str,
+) -> Result<PathBuf, String> {
+    Ok(observer_session_dir(base, table_id, observer_name)?.join("session.json"))
 }
 
 /// Write `session.json` via temp file + rename (best-effort atomic replace).
@@ -152,70 +188,16 @@ fn write_session_state_atomic(path: &Path, json: &str) -> Result<(), String> {
     fs::rename(&tmp, path).map_err(|e| e.to_string())
 }
 
-/// If `session.json` is missing, try `last_applied_seq` from legacy `config.json`, migrate, strip key.
-fn try_migrate_legacy_last_applied_seq(session_key: &str) -> Result<Option<u64>, String> {
-    if session_key.contains('/') || session_key.contains('\\') || session_key.contains('\0') {
-        return Ok(None);
-    }
-    let p = config_path();
-    if !p.exists() {
-        return Ok(None);
-    }
-    let raw = fs::read_to_string(&p).map_err(|e| e.to_string())?;
-    let mut v: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-    let seq = v
-        .get("last_applied_seq")
-        .and_then(|x| x.as_object())
-        .and_then(|m| m.get(session_key))
-        .and_then(|x| x.as_u64());
-    let Some(seq) = seq else {
-        return Ok(None);
-    };
-
-    let dest = session_json_path(session_key);
-    let state = PlayerSession {
-        last_applied_seq: seq,
-        ..PlayerSession::default()
-    };
-    let s = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
-    write_session_state_atomic(&dest, &s)?;
-
-    if let Some(obj) = v.as_object_mut() {
-        if let Some(serde_json::Value::Object(m)) = obj.get_mut("last_applied_seq") {
-            m.remove(session_key);
-            if m.is_empty() {
-                obj.remove("last_applied_seq");
-            }
-        }
-    }
-    fs::write(
-        &p,
-        serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    Ok(Some(seq))
-}
-
 fn read_player_session(
     base: &str,
     table_id: &str,
     player_id: &str,
 ) -> Result<Option<PlayerSession>, String> {
-    let sid = session_host_port_key_from_base(base)?;
-    validate_session_id_component(table_id, "table_id")?;
-    validate_session_id_component(player_id, "player_id")?;
-    let session_key = seq_key(&sid, table_id, player_id);
-    let path = session_json_path(&session_key);
+    let path = player_session_json_path(base, table_id, player_id)?;
     if path.exists() {
         let raw = fs::read_to_string(&path).map_err(|e| e.to_string())?;
         let state: PlayerSession = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
         return Ok(Some(state));
-    }
-    if let Some(seq) = try_migrate_legacy_last_applied_seq(&session_key)? {
-        return Ok(Some(PlayerSession {
-            last_applied_seq: seq,
-            ..PlayerSession::default()
-        }));
     }
     Ok(None)
 }
@@ -226,11 +208,7 @@ fn write_player_session(
     player_id: &str,
     session: &PlayerSession,
 ) -> Result<(), String> {
-    let sid = session_host_port_key_from_base(base)?;
-    validate_session_id_component(table_id, "table_id")?;
-    validate_session_id_component(player_id, "player_id")?;
-    let session_key = seq_key(&sid, table_id, player_id);
-    let path = session_json_path(&session_key);
+    let path = player_session_json_path(base, table_id, player_id)?;
     let s = serde_json::to_string_pretty(session).map_err(|e| e.to_string())?;
     write_session_state_atomic(&path, &s)
 }
@@ -244,11 +222,7 @@ fn read_session_last_applied_seq(
 }
 
 fn read_auth_session(base: &str, table_id: &str, player_id: &str) -> Result<Option<AuthSession>, String> {
-    let sid = session_host_port_key_from_base(base)?;
-    validate_session_id_component(table_id, "table_id")?;
-    validate_session_id_component(player_id, "player_id")?;
-    let session_key = seq_key(&sid, table_id, player_id);
-    let path = auth_json_path(&session_key);
+    let path = player_auth_json_path(base, table_id, player_id)?;
     if !path.exists() {
         return Ok(None);
     }
@@ -258,11 +232,9 @@ fn read_auth_session(base: &str, table_id: &str, player_id: &str) -> Result<Opti
 }
 
 fn write_auth_session(base: &str, table_id: &str, auth: &AuthSession) -> Result<(), String> {
-    let sid = session_host_port_key_from_base(base)?;
     validate_session_id_component(table_id, "table_id")?;
     validate_session_id_component(&auth.player_id, "player_id")?;
-    let session_key = seq_key(&sid, table_id, &auth.player_id);
-    let path = auth_json_path(&session_key);
+    let path = player_auth_json_path(base, table_id, &auth.player_id)?;
     let s = serde_json::to_string_pretty(auth).map_err(|e| e.to_string())?;
     write_session_state_atomic(&path, &s)
 }
@@ -313,19 +285,12 @@ impl CliConfig {
     }
 }
 
-fn seq_key(host_port_key: &str, table_id: &str, player_id: &str) -> String {
-    format!("{}.{}.{}", host_port_key, table_id, player_id)
-}
-
-/// Observer session uses the same flat layout as players: `seq_key(hostPortKey, table_id, "observer")`.
-fn observer_session_json_path(base: &str, table_id: &str) -> Result<PathBuf, String> {
-    let sid = session_host_port_key_from_base(base)?;
-    validate_session_id_component(table_id, "table_id")?;
-    Ok(session_json_path(&seq_key(&sid, table_id, "observer")))
-}
-
-fn read_observer_session(base: &str, table_id: &str) -> Result<Option<PlayerSession>, String> {
-    let path = observer_session_json_path(base, table_id)?;
+fn read_observer_session(
+    base: &str,
+    table_id: &str,
+    observer_name: &str,
+) -> Result<Option<PlayerSession>, String> {
+    let path = observer_session_json_path(base, table_id, observer_name)?;
     if path.exists() {
         let raw = fs::read_to_string(&path).map_err(|e| e.to_string())?;
         let state: PlayerSession = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
@@ -337,9 +302,10 @@ fn read_observer_session(base: &str, table_id: &str) -> Result<Option<PlayerSess
 fn write_observer_session(
     base: &str,
     table_id: &str,
+    observer_name: &str,
     session: &PlayerSession,
 ) -> Result<(), String> {
-    let path = observer_session_json_path(base, table_id)?;
+    let path = observer_session_json_path(base, table_id, observer_name)?;
     let s = serde_json::to_string_pretty(session).map_err(|e| e.to_string())?;
     write_session_state_atomic(&path, &s)
 }
@@ -347,8 +313,11 @@ fn write_observer_session(
 fn read_session_last_applied_seq_observer(
     base: &str,
     table_id: &str,
+    observer_name: &str,
 ) -> Result<Option<u64>, String> {
-    Ok(read_observer_session(base, table_id)?.map(|s| s.last_applied_seq))
+    Ok(
+        read_observer_session(base, table_id, observer_name)?.map(|s| s.last_applied_seq),
+    )
 }
 
 fn base_url(cfg: &CliConfig) -> Result<String, String> {
@@ -357,7 +326,131 @@ fn base_url(cfg: &CliConfig) -> Result<String, String> {
         .ok_or_else(|| "no active server: run `clawguandan server use <hostOrIp[:port]>`".into())
 }
 
-/// GET `{base}/ping`; returns JSON when `pong` is `clawguandan`.
+/// Stable origin key for dedup (`http`/`https`, host case-folded for domains, port).
+fn web_origin_key(base: &str) -> Option<String> {
+    let n = normalize_base(base);
+    let u = Url::parse(&n).ok()?;
+    let scheme = u.scheme().to_ascii_lowercase();
+    let host_key = match u.host()? {
+        url::Host::Domain(d) => d.to_ascii_lowercase(),
+        url::Host::Ipv4(ip) => format!("{ip}"),
+        url::Host::Ipv6(ip) => format!("{ip}"),
+    };
+    let port = u.port_or_known_default()?;
+    Some(format!("{scheme}://{host_key}:{port}"))
+}
+
+fn http_origin_is_localhost(base: &str) -> bool {
+    let n = normalize_base(base);
+    let Ok(u) = Url::parse(&n) else {
+        return false;
+    };
+    match u.host() {
+        Some(url::Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
+/// `0` = LAN-ish (private / link-local / ULA / `.local`), `1` = WAN / global / public DNS.
+fn classify_web_ui_url_tier(url: &str) -> u8 {
+    let n = normalize_base(url);
+    let Ok(u) = Url::parse(&n) else {
+        return 1;
+    };
+    let Some(host) = u.host() else {
+        return 1;
+    };
+    match host {
+        url::Host::Ipv4(ip) => {
+            if ip.is_loopback() || ip.is_unspecified() {
+                return 1;
+            }
+            if ip.is_private() || ip.is_link_local() {
+                0
+            } else {
+                1
+            }
+        }
+        url::Host::Ipv6(ip) => {
+            if ip.is_loopback() || ip.is_unspecified() {
+                return 1;
+            }
+            if ip.is_unique_local() || ip.is_unicast_link_local() {
+                0
+            } else {
+                1
+            }
+        }
+        url::Host::Domain(d) => {
+            if d.eq_ignore_ascii_case("localhost") {
+                return 1;
+            }
+            if d.to_ascii_lowercase().ends_with(".local") {
+                0
+            } else {
+                1
+            }
+        }
+    }
+}
+
+fn merge_and_sort_web_ui_urls(v: &serde_json::Value, active_base: Option<&str>) -> Vec<String> {
+    let mut by_key: HashMap<String, String> = HashMap::new();
+
+    if let Some(arr) = v.get("lanWebUrls").and_then(|x| x.as_array()) {
+        for x in arr {
+            if let Some(s) = x.as_str() {
+                let n = normalize_base(s);
+                if let Some(k) = web_origin_key(&n) {
+                    by_key.entry(k).or_insert(n);
+                }
+            }
+        }
+    }
+
+    if let Some(ab) = active_base {
+        let n = normalize_base(ab);
+        if !http_origin_is_localhost(&n) {
+            if let Some(k) = web_origin_key(&n) {
+                if !by_key.contains_key(&k) {
+                    by_key.insert(k, n);
+                }
+            }
+        }
+    }
+
+    let mut urls: Vec<String> = by_key.into_values().collect();
+    urls.sort_by(|a, b| {
+        classify_web_ui_url_tier(a)
+            .cmp(&classify_web_ui_url_tier(b))
+            .then_with(|| a.cmp(b))
+    });
+    if urls.is_empty() && let Some(ab) = active_base {
+        urls.push(normalize_base(ab));
+    }
+    urls
+}
+
+/// `active_base`: normalized `http(s)://host:port` used to reach `/ping` (e.g. configured `server_url`).
+fn print_web_ui_urls_hint(v: &serde_json::Value, active_base: Option<&str>) {
+    let urls = merge_and_sort_web_ui_urls(v, active_base);
+    if urls.is_empty() {
+        return;
+    }
+    println!("You can try these URLs to open the Web UI:");
+    for u in urls {
+        println!("  {u}");
+    }
+}
+
+fn print_web_ui_urls_hint_blocking(base: &str) {
+    if let Ok(v) = fetch_ping_json_blocking(base) {
+        print_web_ui_urls_hint(&v, Some(base));
+    }
+}
+
 fn fetch_ping_json_blocking(base: &str) -> Result<serde_json::Value, String> {
     let client = Client::builder()
         .timeout(Duration::from_secs(2))
@@ -487,6 +580,9 @@ pub(crate) enum BotCmd {
         /// Number of hands to complete (each ends in scoring)
         #[arg(long, default_value_t = 1)]
         hands: u32,
+        /// Print every subprocess command and its stdout/stderr (default: compact logs only)
+        #[arg(short, long)]
+        verbose: bool,
     },
 }
 
@@ -566,6 +662,9 @@ pub(crate) enum TableCmd {
         seq: Option<u64>,
         #[arg(long, default_value_t = 60000)]
         timeout_ms: u64,
+        /// Observer session subdirectory `observer.<name>` (default `default` when omitted; mutually exclusive with `-p`)
+        #[arg(long, conflicts_with = "player_id")]
+        observer_name: Option<String>,
     },
     /// Current table snapshot (GET snapshot)
     Snapshot {
@@ -577,7 +676,7 @@ pub(crate) enum TableCmd {
         player_key: Option<String>,
     },
     /// Poll `nextstate` with `timeoutMs=0` until caught up; print materialized state (default: summary JSON).
-    /// Omit `-p` for observer mode (session key `<hostPortKey>.<table_id>.observer`, same layout as players).
+    /// Omit `-p` for observer mode (session under `.../<hostPortKey>/<tableId>/observer.<name>/`).
     Sync {
         #[arg(short = 't', long)]
         table_id: String,
@@ -590,6 +689,9 @@ pub(crate) enum TableCmd {
         /// Print full table state + private (default is a fixed-key summary)
         #[arg(long)]
         full: bool,
+        /// Observer session subdirectory `observer.<name>` (default `default` when omitted; mutually exclusive with `-p`)
+        #[arg(long, conflicts_with = "player_id")]
+        observer_name: Option<String>,
     },
 }
 
@@ -731,7 +833,15 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 player_key,
                 seq,
                 timeout_ms,
-            } => table_nextstate(table_id, player_id, player_key, seq, timeout_ms),
+                observer_name,
+            } => table_nextstate(
+                table_id,
+                player_id,
+                player_key,
+                seq,
+                timeout_ms,
+                observer_name,
+            ),
             TableCmd::Snapshot {
                 table_id,
                 player_id,
@@ -743,6 +853,7 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 player_key,
                 seq,
                 full,
+                observer_name,
             } => table_sync(
                 table_id,
                 player_id,
@@ -753,6 +864,7 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 } else {
                     MaterializedPrintMode::Summary
                 }),
+                observer_name,
             ),
         },
         Top::Bot { cmd } => match cmd {
@@ -761,7 +873,8 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 rank,
                 players,
                 hands,
-            } => simulate_cliplay_subprocess(table, rank, players, hands),
+                verbose,
+            } => simulate_cliplay_subprocess(table, rank, players, hands, verbose),
         },
         Top::Show { cmd } => match cmd {
             ShowCmd::Rules { lang } => {
@@ -915,6 +1028,7 @@ pub async fn server_start(auto_use: bool) -> Result<(), String> {
         if auto_use {
             return server_use_async(LOCAL_SERVER_PROBE_ADDR.into()).await;
         }
+        print_web_ui_urls_hint_blocking(&local_base);
         return Ok(());
     }
 
@@ -950,7 +1064,12 @@ pub async fn server_start(auto_use: bool) -> Result<(), String> {
             probe_clawguandan_server_async(&local_base).await
         };
         match r {
-            Ok(()) => return Ok(()),
+            Ok(()) => {
+                if !auto_use {
+                    print_web_ui_urls_hint_blocking(&local_base);
+                }
+                return Ok(());
+            }
             Err(e) => last_err = e,
         }
     }
@@ -1053,9 +1172,10 @@ pub async fn server_restart(auto_use: bool) -> Result<(), String> {
 
 fn persist_active_server(base: String) -> Result<(), String> {
     let mut cfg = CliConfig::load();
-    cfg.server_url = Some(base);
+    cfg.server_url = Some(base.clone());
     cfg.save()?;
     println!("active server: {}", cfg.server_url.as_deref().unwrap_or(""));
+    print_web_ui_urls_hint_blocking(&base);
     Ok(())
 }
 
@@ -1079,8 +1199,11 @@ fn server_status() -> Result<(), String> {
     println!("server_url: {:?}", cfg.server_url);
     let status = match &cfg.server_url {
         None => "unreachable",
-        Some(url) => match ping_clawguandan_info(url) {
-            Ok(_) => "active",
+        Some(url) => match fetch_ping_json_blocking(url) {
+            Ok(v) => {
+                print_web_ui_urls_hint(&v, Some(url.as_str()));
+                "active"
+            }
             Err(_) => "unreachable",
         },
     };
@@ -1405,14 +1528,15 @@ fn ensure_session_bootstrap_observer(
     base: &str,
     client: &Client,
     table_id: &str,
+    observer_name: &str,
 ) -> Result<PlayerSession, String> {
-    let mut s = read_observer_session(base, table_id)?.unwrap_or_default();
+    let mut s = read_observer_session(base, table_id, observer_name)?.unwrap_or_default();
     if s.table_state.is_none() {
         let snap = http_get_snapshot_parsed(base, client, table_id, None, None)?;
         s.table_state = Some(snap.state);
         s.private_view = None;
         s.last_applied_seq = s.table_state.as_ref().map(|t| t.seq).unwrap_or(0);
-        write_observer_session(base, table_id, &s)?;
+        write_observer_session(base, table_id, observer_name, &s)?;
     }
     Ok(s)
 }
@@ -1421,9 +1545,10 @@ fn merge_nextstate_into_observer_session(
     base: &str,
     client: &Client,
     table_id: &str,
+    observer_name: &str,
     body: &NextStateBody,
 ) -> Result<(), String> {
-    let mut s = ensure_session_bootstrap_observer(base, client, table_id)?;
+    let mut s = ensure_session_bootstrap_observer(base, client, table_id, observer_name)?;
     let ts = s
         .table_state
         .as_mut()
@@ -1433,7 +1558,7 @@ fn merge_nextstate_into_observer_session(
     *ts = new_ts;
     s.last_applied_seq = body.transition.seq;
     s.private_view = None;
-    write_observer_session(base, table_id, &s)?;
+    write_observer_session(base, table_id, observer_name, &s)?;
     Ok(())
 }
 
@@ -1539,7 +1664,14 @@ fn table_join(
         "{}",
         serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
     );
-    table_sync(table_id, Some(pid), Some(pkey), None, None)
+    table_sync(
+        table_id,
+        Some(pid),
+        Some(pkey),
+        None,
+        None,
+        None,
+    )
 }
 
 fn table_nextstate(
@@ -1548,17 +1680,32 @@ fn table_nextstate(
     player_key: Option<String>,
     manual_seq: Option<u64>,
     timeout_ms: u64,
+    observer_name: Option<String>,
 ) -> Result<(), String> {
     let base = load_active_server_base()?;
     let client = http_client()?;
+
+    let observer_key: Option<&str> = if player_id.is_none() && manual_seq.is_none() {
+        let on = observer_name.as_deref().unwrap_or("default").trim();
+        if on.is_empty() {
+            return Err("invalid --observer-name: empty".into());
+        }
+        validate_session_id_component(on, "observer_name")?;
+        Some(on)
+    } else {
+        None
+    };
 
     let since_seq = if let Some(s) = manual_seq {
         s
     } else if let Some(ref pid) = player_id {
         read_session_last_applied_seq(&base, &table_id, pid)?.unwrap_or(0)
     } else {
-        // Observer auto-seq: read `…tableId.observer` session (same as `table sync` without `-p`).
-        read_session_last_applied_seq_observer(&base, &table_id)?.unwrap_or(0)
+        let on = observer_key.ok_or_else(|| {
+            "internal: observer auto-seq requires table nextstate without --seq and without -p"
+                .to_string()
+        })?;
+        read_session_last_applied_seq_observer(&base, &table_id, on)?.unwrap_or(0)
     };
 
     let mut u = url::Url::parse(&format!("{}/api/v1/tables/{}/nextstate", base, table_id))
@@ -1592,7 +1739,11 @@ fn table_nextstate(
                 let pkey = resolve_player_key(&base, &table_id, pid, player_key.as_deref())?;
                 merge_nextstate_into_session(&base, &client, &table_id, pid, &pkey, &body)?;
             } else if player_id.is_none() && manual_seq.is_none() {
-                merge_nextstate_into_observer_session(&base, &client, &table_id, &body)?;
+                let on = observer_key.ok_or_else(|| {
+                    "internal: observer session merge requires table nextstate without --seq and without -p"
+                        .to_string()
+                })?;
+                merge_nextstate_into_observer_session(&base, &client, &table_id, on, &body)?;
             }
             Ok(())
         }
@@ -1606,6 +1757,7 @@ fn table_sync(
     player_key: Option<String>,
     manual_seq: Option<u64>,
     print: Option<MaterializedPrintMode>,
+    observer_name: Option<String>,
 ) -> Result<(), String> {
     if manual_seq.is_some() {
         return Err("table sync does not support --seq (uses session auto-seq)".into());
@@ -1618,10 +1770,15 @@ fn table_sync(
 
     match &player_id {
         None => {
-            ensure_session_bootstrap_observer(&base, &client, &table_id)?;
+            let on = observer_name.as_deref().unwrap_or("default").trim();
+            if on.is_empty() {
+                return Err("invalid --observer-name: empty".into());
+            }
+            validate_session_id_component(on, "observer_name")?;
+            ensure_session_bootstrap_observer(&base, &client, &table_id, on)?;
             loop {
                 let since_seq =
-                    read_session_last_applied_seq_observer(&base, &table_id)?.unwrap_or(0);
+                    read_session_last_applied_seq_observer(&base, &table_id, on)?.unwrap_or(0);
                 let mut u =
                     url::Url::parse(&format!("{}/api/v1/tables/{}/nextstate", base, table_id))
                         .map_err(|e| e.to_string())?;
@@ -1636,7 +1793,7 @@ fn table_sync(
                     }
                     s if s.is_success() => {
                         let body: NextStateBody = r.json().map_err(|e| e.to_string())?;
-                        merge_nextstate_into_observer_session(&base, &client, &table_id, &body)?;
+                        merge_nextstate_into_observer_session(&base, &client, &table_id, on, &body)?;
                         if body.lag == 0 {
                             break;
                         }
@@ -1645,7 +1802,7 @@ fn table_sync(
                 }
             }
 
-            let s = read_observer_session(&base, &table_id)?
+            let s = read_observer_session(&base, &table_id, on)?
                 .ok_or_else(|| "sync: missing session".to_string())?;
             if let Some(mode) = print {
                 print_materialized_session(&s, mode)?;
@@ -1709,6 +1866,7 @@ fn play_wait4myturn(
         table_id.clone(),
         Some(player_id.clone()),
         player_key.clone(),
+        None,
         None,
         None,
     )?;
@@ -1807,7 +1965,14 @@ fn play_ready(
     if no_sync {
         return Ok(());
     }
-    table_sync(table_id, Some(player_id), player_key, None, None)
+    table_sync(
+        table_id,
+        Some(player_id),
+        player_key,
+        None,
+        None,
+        None,
+    )
 }
 
 fn play_action(
@@ -1856,6 +2021,7 @@ fn play_action(
                     Some(pkey.clone()),
                     None,
                     None,
+                    None,
                 )?;
             }
             return Ok(());
@@ -1874,6 +2040,7 @@ fn play_action(
                 table_id.clone(),
                 Some(player_id.clone()),
                 Some(pkey.clone()),
+                None,
                 None,
                 None,
             )?;
@@ -2011,6 +2178,46 @@ fn player_action_to_cli_argv_auto(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn merge_web_urls_lan_before_wan_and_adds_active_wan() {
+        let v = json!({
+            "pong": "clawguandan",
+            "lanWebUrls": ["http://8.8.8.8:1", "http://192.168.2.1:80"],
+        });
+        let merged = merge_and_sort_web_ui_urls(&v, Some("http://198.51.100.2:9999"));
+        assert_eq!(
+            merged,
+            vec![
+                "http://192.168.2.1:80".to_string(),
+                "http://198.51.100.2:9999".to_string(),
+                "http://8.8.8.8:1".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn merge_web_urls_skips_active_localhost_and_dedups_same_origin() {
+        let v = json!({
+            "pong": "clawguandan",
+            "lanWebUrls": ["http://192.168.1.10:22222"],
+        });
+        let only_lan = merge_and_sort_web_ui_urls(&v, Some("http://127.0.0.1:22222"));
+        assert_eq!(only_lan, vec!["http://192.168.1.10:22222".to_string()]);
+
+        let dedup = merge_and_sort_web_ui_urls(&v, Some("http://192.168.1.10:22222"));
+        assert_eq!(dedup, vec!["http://192.168.1.10:22222".to_string()]);
+    }
+
+    #[test]
+    fn merge_web_urls_falls_back_to_active_when_ping_urls_empty() {
+        let v = json!({
+            "pong": "clawguandan",
+            "lanWebUrls": [],
+        });
+        let merged = merge_and_sort_web_ui_urls(&v, Some("127.0.0.1:22222"));
+        assert_eq!(merged, vec!["http://127.0.0.1:22222".to_string()]);
+    }
 
     #[test]
     fn expect_has_uncontrolled_actor_detects_outside_actor() {
@@ -2177,11 +2384,45 @@ impl CliplayShared {
     }
 }
 
+/// Last `/narration` replace in a `nextstate` JSON body (flattened transition).
+fn beat_it_last_narration_from_nextstate_json(v: &Value) -> Option<String> {
+    let ops = v.get("delta")?.get("ops")?.as_array()?;
+    let mut out: Option<String> = None;
+    for op in ops {
+        if op.get("op").and_then(|x| x.as_str()) == Some("replace")
+            && op.get("path").and_then(|x| x.as_str()) == Some("/narration")
+        {
+            if let Some(val) = op.get("value") {
+                out = Some(match val {
+                    Value::String(s) => s.clone(),
+                    _ => val.to_string(),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Narration is often bilingual JSON `{"zh":...,"en":...}` as a string; prefer `en` for CLI.
+fn beat_it_narration_display_en(raw: &str) -> String {
+    let t = raw.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    if let Ok(v) = serde_json::from_str::<Value>(t) {
+        if let Some(en) = v.get("en").and_then(|x| x.as_str()) {
+            return en.trim().to_string();
+        }
+    }
+    t.to_string()
+}
+
 fn simulate_cliplay_subprocess(
     table: Option<String>,
     rank: Option<String>,
     players: Option<u8>,
     hands: u32,
+    verbose: bool,
 ) -> Result<(), String> {
     if hands == 0 {
         return Err("--hands must be >= 1".into());
@@ -2193,13 +2434,23 @@ fn simulate_cliplay_subprocess(
     }
     let bin = std::env::current_exe().map_err(|e| e.to_string())?;
 
-    println!("--- bot beat-it: hands={hands} (observer + bots; subprocess CLI; auto-seq) ---");
+    if verbose {
+        println!("--- bot beat-it: hands={hands} (observer + bots; subprocess CLI; auto-seq) ---");
+    } else {
+        println!(
+            "--- bot beat-it: hands={hands} (compact log; use -v for subprocess I/O) ---"
+        );
+    }
 
     let table_id = if let Some(tid) = table {
         if rank.is_some() {
             return Err("--rank is only allowed when creating a new table (omit --table)".into());
         }
-        println!("\n### [table target]\nusing existing table: {tid}");
+        if verbose {
+            println!("\n### [table target]\nusing existing table: {tid}");
+        } else {
+            println!("--- bot beat-it: using existing table_id={tid} ---");
+        }
         tid
     } else {
         let label = "table create";
@@ -2212,16 +2463,24 @@ fn simulate_cliplay_subprocess(
             create_args.push("--rank".to_string());
             create_args.push(rank.to_string());
         }
-        println!("\n### [{label}]\n$ clawguandan {}", create_args.join(" "));
+        if verbose {
+            println!("\n### [{label}]\n$ clawguandan {}", create_args.join(" "));
+        }
         let out = run_cli_command(&bin, &create_args).map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&out.stdout);
-        println!("<< stdout:\n{stdout}");
+        if verbose {
+            println!("<< stdout:\n{stdout}");
+        }
         let create_v = parse_cli_stdout_json(&out.stdout)?;
-        create_v["tableId"]
+        let tid = create_v["tableId"]
             .as_str()
             .or_else(|| create_v["table_id"].as_str())
             .ok_or_else(|| "create: missing tableId".to_string())?
-            .to_string()
+            .to_string();
+        if !verbose {
+            println!("--- bot beat-it: created table_id={tid} ---");
+        }
+        tid
     };
 
     let snapshot_args = vec![
@@ -2230,13 +2489,17 @@ fn simulate_cliplay_subprocess(
         "-t".to_string(),
         table_id.clone(),
     ];
-    println!(
-        "\n### [table snapshot]\n$ clawguandan {}",
-        snapshot_args.join(" ")
-    );
+    if verbose {
+        println!(
+            "\n### [table snapshot]\n$ clawguandan {}",
+            snapshot_args.join(" ")
+        );
+    }
     let snapshot_out = run_cli_command(&bin, &snapshot_args).map_err(|e| e.to_string())?;
     let snapshot_stdout = String::from_utf8_lossy(&snapshot_out.stdout);
-    println!("<< stdout:\n{snapshot_stdout}");
+    if verbose {
+        println!("<< stdout:\n{snapshot_stdout}");
+    }
     let snapshot = parse_cli_stdout_json(&snapshot_out.stdout)?;
     let snapshot_state: TableState =
         serde_json::from_value(snapshot.clone()).map_err(|e| format!("snapshot parse: {e}"))?;
@@ -2276,15 +2539,41 @@ fn simulate_cliplay_subprocess(
         ));
     }
     println!(
-        "\n--- bot beat-it: table_id={table_id} occupied={occupied} vacancy={vacancy} target_join={target_join} ---"
+        "--- bot beat-it: table_id={table_id} occupied={occupied} vacancy={vacancy} join_bots={target_join} ---"
     );
 
-    // Reset observer auto-seq baseline to current head to avoid replaying historical scoring
-    // transitions from a stale persisted `<table>.observer` session.
+    // Per-run observer session name so we do not read/write `observer.default` (user tooling)
+    // or clash with another concurrent beat-it on the same host/table.
+    let observer_name = {
+        let s = Uuid::new_v4().to_string();
+        let frag = s
+            .split('-')
+            .next()
+            .expect("uuid v4 string is hyphenated");
+        format!("bi{frag}")
+    };
+    validate_session_id_component(&observer_name, "observer_name")?;
+    println!("--- bot beat-it: observer_session={observer_name} ---");
+
+    let last_narration_raw: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
+    if !verbose {
+        let raw = snapshot_state.narration.trim();
+        if !raw.is_empty() {
+            let line = beat_it_narration_display_en(raw);
+            if !line.is_empty() {
+                println!("[narration] {line}");
+                *last_narration_raw.lock().unwrap() = Some(raw.to_string());
+            }
+        }
+    }
+
+    // Bootstrap observer auto-seq at current head so we do not replay historical scoring
+    // transitions from any prior materialized state under this session name.
     let base = load_active_server_base()?;
     write_observer_session(
         &base,
         &table_id,
+        &observer_name,
         &PlayerSession {
             version: 1,
             last_applied_seq: start_seq,
@@ -2306,16 +2595,26 @@ fn simulate_cliplay_subprocess(
             "--seat".to_string(),
             "auto".to_string(),
         ];
-        println!("\n### [{label}]\n$ clawguandan {}", args.join(" "));
+        if verbose {
+            println!("\n### [{label}]\n$ clawguandan {}", args.join(" "));
+        }
         let out = run_cli_command(&bin, &args).map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&out.stdout);
-        println!("<< stdout:\n{stdout}");
+        if verbose {
+            println!("<< stdout:\n{stdout}");
+        }
         let j = parse_cli_stdout_json(&out.stdout)?;
         let pid = j["playerId"]
             .as_str()
             .ok_or_else(|| "join: missing playerId".to_string())?
             .to_string();
         pids.push(pid);
+    }
+    if !verbose && !pids.is_empty() {
+        println!(
+            "--- bot beat-it: joined {} bot(s), sent ready ---",
+            pids.len()
+        );
     }
 
     for (i, pid) in pids.iter().enumerate() {
@@ -2328,10 +2627,14 @@ fn simulate_cliplay_subprocess(
             "-p".to_string(),
             pid.clone(),
         ];
-        println!("\n### [{label}]\n$ clawguandan {}", args.join(" "));
+        if verbose {
+            println!("\n### [{label}]\n$ clawguandan {}", args.join(" "));
+        }
         let out = run_cli_command(&bin, &args).map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&out.stdout);
-        println!("<< stdout:\n{stdout}");
+        if verbose {
+            println!("<< stdout:\n{stdout}");
+        }
         let _j = parse_cli_stdout_json(&out.stdout)?;
     }
 
@@ -2355,7 +2658,9 @@ fn simulate_cliplay_subprocess(
 
     let bin_obs = bin.clone();
     let table_id_obs = table_id.clone();
+    let observer_name_obs = observer_name.clone();
     let shared_obs = Arc::clone(&shared);
+    let last_narr_obs = Arc::clone(&last_narration_raw);
     handles.push(thread::spawn(move || {
         loop {
             if shared_obs.stop.load(Ordering::SeqCst) {
@@ -2366,10 +2671,14 @@ fn simulate_cliplay_subprocess(
                 "nextstate".to_string(),
                 "-t".to_string(),
                 table_id_obs.clone(),
+                "--observer-name".to_string(),
+                observer_name_obs.clone(),
                 "--timeout-ms".to_string(),
                 NEXTSTATE_TIMEOUT_MS.to_string(),
             ];
-            println!("\n### [observer] $ clawguandan {}", argv.join(" "));
+            if verbose {
+                println!("\n### [observer] $ clawguandan {}", argv.join(" "));
+            }
             let out = match run_cli_command(&bin_obs, &argv) {
                 Ok(o) => o,
                 Err(e) => {
@@ -2391,9 +2700,11 @@ fn simulate_cliplay_subprocess(
             };
             let out_txt = String::from_utf8_lossy(&out.stdout);
             let err_txt = String::from_utf8_lossy(&out.stderr);
-            println!("<< [observer] stdout:\n{out_txt}");
-            if !err_txt.trim().is_empty() {
-                println!("<< [observer] stderr:\n{err_txt}");
+            if verbose {
+                println!("<< [observer] stdout:\n{out_txt}");
+                if !err_txt.trim().is_empty() {
+                    println!("<< [observer] stderr:\n{err_txt}");
+                }
             }
 
             if nextstate_stdout_is_no_content(&out.stdout) {
@@ -2407,6 +2718,19 @@ fn simulate_cliplay_subprocess(
                     break;
                 }
             };
+            if !verbose {
+                if let Some(raw) = beat_it_last_narration_from_nextstate_json(&v) {
+                    let mut g = last_narr_obs.lock().unwrap();
+                    let changed = g.as_ref().map(|s| s.as_str()) != Some(raw.as_str());
+                    if changed {
+                        let disp = beat_it_narration_display_en(&raw);
+                        if !disp.is_empty() {
+                            println!("[narration] {disp}");
+                        }
+                        *g = Some(raw);
+                    }
+                }
+            }
             shared_obs.on_transition_maybe_scoring(&v);
             shared_obs.on_transition_maybe_terminal(&v);
             if shared_obs.stop.load(Ordering::SeqCst) {
@@ -2422,6 +2746,7 @@ fn simulate_cliplay_subprocess(
         let controlled_pids = Arc::clone(&controlled_pids);
         let controlled_pids_text = controlled_pids_text.clone();
         let prefix = format!("bot{i}");
+        let verbose_bot = verbose;
         handles.push(thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(50 * i as u64));
             let mut steps: u64 = 0;
@@ -2447,10 +2772,12 @@ fn simulate_cliplay_subprocess(
                     "--timeout-ms".to_string(),
                     NEXTSTATE_TIMEOUT_MS.to_string(),
                 ];
-                println!(
-                    "\n### [{prefix}] $ clawguandan {}",
-                    argv.join(" ")
-                );
+                if verbose_bot {
+                    println!(
+                        "\n### [{prefix}] $ clawguandan {}",
+                        argv.join(" ")
+                    );
+                }
                 let out = match run_cli_command(&bin, &argv) {
                     Ok(o) => o,
                     Err(e) => {
@@ -2472,9 +2799,11 @@ fn simulate_cliplay_subprocess(
                 };
                 let out_txt = String::from_utf8_lossy(&out.stdout);
                 let err_txt = String::from_utf8_lossy(&out.stderr);
-                println!("<< [{prefix}] stdout:\n{out_txt}");
-                if !err_txt.trim().is_empty() {
-                    println!("<< [{prefix}] stderr:\n{err_txt}");
+                if verbose_bot {
+                    println!("<< [{prefix}] stdout:\n{out_txt}");
+                    if !err_txt.trim().is_empty() {
+                        println!("<< [{prefix}] stderr:\n{err_txt}");
+                    }
                 }
 
                 let state = match parse_cli_stdout_json(&out.stdout) {
@@ -2515,16 +2844,20 @@ fn simulate_cliplay_subprocess(
                             "-p".to_string(),
                             pid.clone(),
                         ];
-                        println!(
-                            "\n### [{prefix}] $ clawguandan {}",
-                            argv.join(" ")
-                        );
+                        if verbose_bot {
+                            println!(
+                                "\n### [{prefix}] $ clawguandan {}",
+                                argv.join(" ")
+                            );
+                        }
                         match run_cli_command(&bin, &argv) {
                             Ok(o) => {
-                                println!(
-                                    "<< [{prefix}] stdout:\n{}",
-                                    String::from_utf8_lossy(&o.stdout)
-                                );
+                                if verbose_bot {
+                                    println!(
+                                        "<< [{prefix}] stdout:\n{}",
+                                        String::from_utf8_lossy(&o.stdout)
+                                    );
+                                }
                             }
                             Err(e) => {
                                 shared.fail(format!("{prefix}: ready: {e}"));
@@ -2540,10 +2873,12 @@ fn simulate_cliplay_subprocess(
                             "-p".to_string(),
                             pid.clone(),
                         ];
-                        println!(
-                            "\n### [{prefix}] $ clawguandan {}",
-                            sargv.join(" ")
-                        );
+                        if verbose_bot {
+                            println!(
+                                "\n### [{prefix}] $ clawguandan {}",
+                                sargv.join(" ")
+                            );
+                        }
                         let sug_out = match run_cli_command(&bin, &sargv) {
                             Ok(o) => o,
                             Err(e) => {
@@ -2551,10 +2886,12 @@ fn simulate_cliplay_subprocess(
                                 break;
                             }
                         };
-                        println!(
-                            "<< [{prefix}] stdout:\n{}",
-                            String::from_utf8_lossy(&sug_out.stdout)
-                        );
+                        if verbose_bot {
+                            println!(
+                                "<< [{prefix}] stdout:\n{}",
+                                String::from_utf8_lossy(&sug_out.stdout)
+                            );
+                        }
                         let sug = match parse_cli_stdout_json(&sug_out.stdout) {
                             Ok(j) => j,
                             Err(e) => {
@@ -2581,16 +2918,20 @@ fn simulate_cliplay_subprocess(
                             }
                         };
                         let argv = player_action_to_cli_argv_auto(&action, &table_id, &pid);
-                        println!(
-                            "\n### [{prefix}] $ clawguandan {}",
-                            argv.join(" ")
-                        );
+                        if verbose_bot {
+                            println!(
+                                "\n### [{prefix}] $ clawguandan {}",
+                                argv.join(" ")
+                            );
+                        }
                         match run_cli_command(&bin, &argv) {
                             Ok(o) => {
-                                println!(
-                                    "<< [{prefix}] stdout:\n{}",
-                                    String::from_utf8_lossy(&o.stdout)
-                                );
+                                if verbose_bot {
+                                    println!(
+                                        "<< [{prefix}] stdout:\n{}",
+                                        String::from_utf8_lossy(&o.stdout)
+                                    );
+                                }
                             }
                             Err(e) => {
                                 shared.fail(format!("{prefix}: action: {e}"));
@@ -2617,9 +2958,69 @@ fn simulate_cliplay_subprocess(
     }
 
     let base = load_active_server_base()?;
-    let last_seq = read_session_last_applied_seq_observer(&base, &table_id)?.unwrap_or(0);
-    println!("\n=== bot beat-it done. table_id={table_id} observer_last_seq={last_seq} ===");
+    let last_seq =
+        read_session_last_applied_seq_observer(&base, &table_id, &observer_name)?.unwrap_or(0);
+    println!(
+        "\n=== bot beat-it done. table_id={table_id} observer_name={observer_name} observer_last_seq={last_seq} ==="
+    );
     Ok(())
+}
+
+#[cfg(test)]
+#[test]
+fn session_dirs_use_host_table_leaf_layout() {
+    let base = "http://127.0.0.1:22222";
+    let pd = player_session_dir(base, "t_abc", "p_xyz").unwrap();
+    assert_eq!(pd.file_name().and_then(|s| s.to_str()), Some("p_xyz"));
+    assert_eq!(
+        pd.parent().and_then(|p| p.file_name()).and_then(|s| s.to_str()),
+        Some("t_abc")
+    );
+    assert_eq!(
+        pd.parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str()),
+        Some("127.0.0.1_22222")
+    );
+    assert!(pd.starts_with(session_state_root()));
+
+    let od = observer_session_dir(base, "t_abc", "default").unwrap();
+    assert_eq!(
+        od.file_name().and_then(|s| s.to_str()),
+        Some("observer.default")
+    );
+    assert_eq!(
+        od.parent().and_then(|p| p.file_name()).and_then(|s| s.to_str()),
+        Some("t_abc")
+    );
+    assert!(od.starts_with(session_state_root()));
+}
+
+#[cfg(test)]
+#[test]
+fn beat_it_narration_display_en_prefers_en_field() {
+    let raw = r#"{"zh":"中文","en":"Hello"}"#;
+    assert_eq!(beat_it_narration_display_en(raw), "Hello");
+    assert_eq!(beat_it_narration_display_en("plain"), "plain");
+}
+
+#[cfg(test)]
+#[test]
+fn beat_it_last_narration_from_nextstate_json_reads_replace_ops() {
+    let v = json!({
+        "seq": 3u64,
+        "delta": {
+            "ops": [
+                { "op": "replace", "path": "/phase", "value": "playing" },
+                { "op": "replace", "path": "/narration", "value": "{\"zh\":\"z\",\"en\":\"e\"}" }
+            ]
+        }
+    });
+    assert_eq!(
+        beat_it_last_narration_from_nextstate_json(&v).as_deref(),
+        Some("{\"zh\":\"z\",\"en\":\"e\"}")
+    );
 }
 
 #[cfg(test)]

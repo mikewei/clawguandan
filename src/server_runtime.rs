@@ -7,6 +7,8 @@ pub async fn serve(ip: IpAddr, port: u16) -> Result<(), String> {
     let addr = SocketAddr::new(ip, port);
     let state = AppState {
         store: TableStore::new(),
+        listen_port: port,
+        bind_ip: ip,
     };
     let app = router(state).layer(TraceLayer::new_for_http());
 

@@ -308,6 +308,10 @@ async fn ping_returns_pong_and_version() {
         Some(u64::from(std::process::id())),
         "ping should report this process id in tests"
     );
+    assert!(
+        v.get("lanWebUrls").and_then(|x| x.as_array()).is_some(),
+        "ping should include lanWebUrls array"
+    );
 }
 
 #[tokio::test]

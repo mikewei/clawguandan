@@ -8,9 +8,9 @@ use crate::error::AppError;
 use crate::game::card::HandLevel;
 use crate::game::engine::{GameEngine, PlayerAction};
 use crate::game::rules::narration::{
-    format_big_play, format_game_end_by_leave, format_hand_end, format_rank_announce,
-    format_tribute_action,
-    format_tribute_canceled, is_big_play_combination,
+    format_big_play, format_game_end_by_leave, format_hand_end, format_hand_open,
+    format_hand_open_with_tribute_canceled, format_rank_announce, format_tribute_action,
+    is_big_play_combination,
 };
 use crate::game::rules::scoring::{Level, ScoringService, WinType};
 use crate::game::types::{
@@ -282,7 +282,10 @@ impl TableStore {
             inner.state.game = Some(gs);
             inner.state.sync_phase_from_game();
             inner.state.waiting_next_hand_ready = false;
-            inner.state.narration.clear();
+            inner.state.narration = format_hand_open(
+                inner.state.current_declarer,
+                first_hand_level.as_api_str(),
+            );
         } else if will_start_next_hand {
             let seq = inner.state.seq;
             let declarer = inner.state.current_declarer;
@@ -318,11 +321,15 @@ impl TableStore {
             };
             inner.state.sync_phase_from_game();
             inner.state.waiting_next_hand_ready = false;
+            let level_s = next_hand_level.as_api_str();
             if let Some(lead) = canceled_opening_lead {
-                inner.state.narration =
-                    format_tribute_canceled(&player_name_for_seat(&inner.state, lead));
+                inner.state.narration = format_hand_open_with_tribute_canceled(
+                    declarer,
+                    level_s,
+                    &player_name_for_seat(&inner.state, lead),
+                );
             } else {
-                inner.state.narration.clear();
+                inner.state.narration = format_hand_open(declarer, level_s);
             }
         }
 

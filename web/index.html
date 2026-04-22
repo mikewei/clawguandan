@@ -128,7 +128,7 @@
         </div>
       </section>
 
-      <details class="panel debug-panel">
+      <details id="debugPanel" class="panel debug-panel hidden">
         <summary data-i18n="debugInfo">Detailed state (debug)</summary>
         <div id="connectionState" class="pill debug-conn" data-i18n="connIdle">Idle</div>
         <div id="tableMeta" class="muted" data-i18n="noTableSelected">No table selected</div>
@@ -136,6 +136,12 @@
         <div id="tableLegalActions" class="legal-actions"></div>
         <div id="promptInfo" class="prompt"></div>
         <div id="topPlay" class="top-play"></div>
+        <h3 data-i18n="debugPlayersDetailTitle">Players detail</h3>
+        <div id="tablePlayersDetail" class="debug-players"></div>
+        <details class="debug-json-wrap" open>
+          <summary data-i18n="debugLatestStateJsonTitle">Latest state JSON</summary>
+          <div id="latestStateJsonTree" class="debug-json-tree mono"></div>
+        </details>
         <h3 data-i18n="tableHistory">Table history</h3>
         <div id="history" class="history"></div>
         <div id="sessionInfo" class="mono muted"></div>
@@ -143,6 +149,25 @@
       </details>
     </section>
   </main>
+  <footer class="app-footer" aria-label="Application metadata">
+    <small class="app-footer-text muted">
+      <a
+        class="app-footer-link"
+        href="https://github.com/mikewei/clawguandan"
+        target="_blank"
+        rel="noopener noreferrer"
+      >ClawGuandan</a>
+      <span class="app-footer-sep" aria-hidden="true">·</span>
+      <span id="appMetaVersion" class="app-footer-version">Version -</span>
+      <span class="app-footer-sep" aria-hidden="true">·</span>
+      <a
+        class="app-footer-link"
+        href="https://opensource.org/license/MIT"
+        target="_blank"
+        rel="noopener noreferrer"
+      >MIT License</a>
+    </small>
+  </footer>
   <script src="/i18n.js" defer></script>
   <script src="/state_replay.js" defer></script>
   <script src="/app.js" defer></script>

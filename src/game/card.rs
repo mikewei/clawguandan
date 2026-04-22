@@ -84,6 +84,25 @@ impl HandLevel {
             HandLevel::A => Rank::A,
         }
     }
+
+    /// API / display rank for the current hand level (e.g. `"10"`, `"A"`).
+    pub fn as_api_str(self) -> &'static str {
+        match self {
+            HandLevel::Two => "2",
+            HandLevel::Three => "3",
+            HandLevel::Four => "4",
+            HandLevel::Five => "5",
+            HandLevel::Six => "6",
+            HandLevel::Seven => "7",
+            HandLevel::Eight => "8",
+            HandLevel::Nine => "9",
+            HandLevel::Ten => "10",
+            HandLevel::J => "J",
+            HandLevel::Q => "Q",
+            HandLevel::K => "K",
+            HandLevel::A => "A",
+        }
+    }
 }
 
 pub fn parse_card_symbol(sym: &str) -> Result<Card, String> {

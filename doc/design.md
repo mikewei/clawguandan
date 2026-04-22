@@ -508,13 +508,14 @@ CLI commands are optional adapters over the Web API, for local testing and bot i
   - By default, after a successful join the CLI runs an internal catch-up (`table sync`) and prints the **local full materialized state** (see `session.json` below). Use `--no-sync` to print only the join API JSON (for scripts).
   - `--type` defaults to `unknown`; `--seat` defaults to `auto`.
   - Example: `clawguandan table join -t t_100 --name "Bot-S" --type ai --seat auto`
-- `clawguandan table nextstate -t <tableId> [-p <playerId>] [-k <playerKey>] [--seq <seq>]`
+- `clawguandan table nextstate -t <tableId> [-p <playerId>] [-k <playerKey>] [--seq <seq>] [--observer-name <name>]` (`--observer-name` is mutually exclusive with `-p`)
   - Long-poll for exactly one next transition (`sinceSeq + 1`).
   - Default stdout is the server JSON (includes `lag`).
-  - With `-p` and **auto-seq**, updates `session.json`: on `200`, merges `delta` into the stored `TableState` and refreshes `private`; if there is no stored `TableState`, performs `GET snapshot` first.
-  - Without `-p`, runs observer mode (public state only; no session updates).
-- `clawguandan table sync -t <tableId> -p <playerId> [-k <playerKey>] [--timeout-ms ...]`
+  - With `-p` and **auto-seq** (no `--seq`), updates the player `session.json`: on `200`, merges `delta` into the stored `TableState` and refreshes `private`; if there is no stored `TableState`, performs `GET snapshot` first.
+  - Without `-p` and without `--seq` (**observer auto-seq**), uses `--observer-name` (default `default`) to read/update the observer `session.json` the same way (public materialized state only; no `private`).
+- `clawguandan table sync -t <tableId> [-p <playerId> [-k <playerKey>]] [--full] [--observer-name <name>]` (`--observer-name` is mutually exclusive with `-p`)
   - Repeats `nextstate` until `lag == 0` or `204` at head; then prints the **local full state** (flattened `TableState` plus optional `private` key). Does not support `--seq` (session auto-seq only).
+  - With `-p`, uses the player session directory (do not pass `--observer-name`); without `-p`, uses the observer session directory selected by `--observer-name` (default `default` when omitted).
 
 `play` commands
 
@@ -537,21 +538,22 @@ CLI commands are optional adapters over the Web API, for local testing and bot i
 
 #### Seq modes
 
-- Default mode is **auto-seq** for player commands with `-p <playerId>`.
-- Auto-seq key: `<host>:<port>` derived prefix (e.g. `127.0.0.1_22222`), then `.<tableId>.<playerId>` (dot-separated), one **session directory** per key under `std::env::temp_dir()/clawguandan/<sessionKey>/session.json` (not in global `~/.config/clawguandan/config.json`).
-- `session.json` stores at minimum `lastAppliedSeq`, and when using `table nextstate` / `table sync` / `wait4myturn`, also a materialized public `TableState` plus optional `privateView` for merging deltas and printing local full state.
-- `auth.json` (same session directory) stores player authentication info (`playerId`, `playerKey`), decoupled from game state sync.
+- Default mode is **auto-seq** for `table nextstate` / `table sync` / `play wait4myturn` when not passing `--seq` (player path requires `-p`; observer path omits `-p`).
+- Session root: `std::env::temp_dir()/clawguandan/` (not in global `~/.config/clawguandan/config.json`). Under that, the first path segment is a **hostPortKey** derived from the active server URL (e.g. `127.0.0.1_22222`), then `<tableId>`, then either `<playerId>/` (players) or `observer.<observerName>/` (observers; default name `default` → directory `observer.default`).
+- **Player** session files: `<tmp>/clawguandan/<hostPortKey>/<tableId>/<playerId>/session.json` and `auth.json` in the same directory.
+- **Observer** session file: `<tmp>/clawguandan/<hostPortKey>/<tableId>/observer.<observerName>/session.json` only.
+- `session.json` stores at minimum `lastAppliedSeq`, and when using `table nextstate` / `table sync` / `wait4myturn` with auto-seq, also a materialized public `TableState` plus optional `privateView` (players only) for merging deltas and printing local full state.
+- `auth.json` (player session directory only) stores player authentication info (`playerId`, `playerKey`), decoupled from game state sync.
 - Player key resolve priority: explicit `--player-key` > auto-load from `auth.json`.
 - Since `playerKey` is server in-memory only, a server restart invalidates old keys; clients should re-join or provide a fresh key when receiving auth errors.
 - `POST .../ready` does not participate in auto-seq for the request body; the CLI still uses session state for post-ready `table sync`.
-- Observer mode (no `-p`) does not support auto-seq persistence.
-- If `--seq` is explicitly provided on supported commands, the CLI runs in **manual-seq** mode: use that value for `sinceSeq` or action `seq`; do not read/write `session.json` for that command (`table sync` and `play wait4myturn` disallow `--seq`).
+- If `--seq` is explicitly provided on supported commands, the CLI runs in **manual-seq** mode: use that value for `sinceSeq` or action `seq`; do not read/write `session.json` for that command (`table sync` and `play wait4myturn` disallow `--seq`). For `table nextstate`, manual `--seq` also disables observer `session.json` updates when `-p` is omitted.
 
 #### Runtime behavior
 
 - Action commands submit intent only; they do not mutate local session state by themselves.
 - After every **gameplay** action command returns, the client SHOULD call `table nextstate` or `table sync` for the same table/player.
-- Local `TableState` / `lastAppliedSeq` are advanced from `GET snapshot` (baseline) and successful `nextstate` responses with `-p` (auto-seq), written to `session.json`.
+- Local `TableState` / `lastAppliedSeq` are advanced from `GET snapshot` (baseline) and successful `nextstate` responses under **auto-seq** (with `-p` for players, or without `-p` for observers), written to `session.json`.
 - Action and ready success responses may include `newSeq`; the CLI does not treat them as authoritative for local materialized state—follow with `nextstate`/`sync` as above.
 
 ## Implementation Guidelines

@@ -1,3 +1,4 @@
+use crate::game::types::TeamId;
 use serde_json::json;
 
 pub fn is_big_play_combination(combination_type: &str) -> bool {
@@ -84,6 +85,44 @@ pub fn format_tribute_canceled(opening_player_name: &str) -> String {
     )
 }
 
+fn declarer_phrase(team: TeamId) -> (&'static str, &'static str) {
+    match team {
+        TeamId::Ew => ("EW（东西）", "the EW team (East–West)"),
+        TeamId::Sn => ("SN（南北）", "the SN team (South–North)"),
+    }
+}
+
+/// Opening line: declarer side and hand level (bilingual JSON string).
+pub fn format_hand_open(declarer: TeamId, level_api: &str) -> String {
+    let (d_zh, d_en) = declarer_phrase(declarer);
+    let lv = level_api.trim();
+    bilingual(
+        format!("本局庄家方（declarer）为{}，打{}。", d_zh, lv),
+        format!("This hand: {} is declarer; hand level {}.", d_en, lv),
+    )
+}
+
+/// Same as [`format_hand_open`] plus tribute-canceled lead (one combined message).
+pub fn format_hand_open_with_tribute_canceled(
+    declarer: TeamId,
+    level_api: &str,
+    opening_player_name: &str,
+) -> String {
+    let (d_zh, d_en) = declarer_phrase(declarer);
+    let lv = level_api.trim();
+    let name = safe_name(opening_player_name);
+    bilingual(
+        format!(
+            "本局庄家方（declarer）为{}，打{}。抗贡（免进贡），由{}先出。",
+            d_zh, lv, name
+        ),
+        format!(
+            "This hand: {} is declarer; hand level {}. Tribute canceled; {} leads first.",
+            d_en, lv, name
+        ),
+    )
+}
+
 pub fn format_hand_end(
     finishing_names: &[String],
     level_ew: &str,
@@ -158,6 +197,24 @@ mod tests {
         let msg = format_tribute_canceled("Alice");
         assert!(msg.contains("抗贡"));
         assert!(msg.contains("Alice"));
+        assert!(msg.contains("Tribute canceled"));
+    }
+
+    #[test]
+    fn hand_open_narration_includes_declarer_and_level() {
+        let msg = format_hand_open(TeamId::Ew, "5");
+        assert!(msg.contains("庄家方"));
+        assert!(msg.contains("打5"));
+        assert!(msg.contains("declarer"));
+        assert!(msg.contains("hand level 5"));
+    }
+
+    #[test]
+    fn hand_open_with_tribute_canceled_combines_parts() {
+        let msg = format_hand_open_with_tribute_canceled(TeamId::Sn, "A", "Bob");
+        assert!(msg.contains("打A"));
+        assert!(msg.contains("抗贡"));
+        assert!(msg.contains("Bob"));
         assert!(msg.contains("Tribute canceled"));
     }
 }

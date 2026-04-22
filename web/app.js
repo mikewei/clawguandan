@@ -5,9 +5,11 @@ const LOBBY_AUTO_REFRESH_MS = 2000;
 const SEATS = ["E", "S", "W", "N"];
 const CLOCKWISE_SEATS = ["N", "E", "S", "W"];
 const FEED_MODE_MEDIA_QUERY = "(max-width: 640px) and (orientation: portrait)";
+const TOUCH_POINTER_MEDIA_QUERY = "(hover: none), (pointer: coarse)";
 const TRICK_RESET_PASS_COUNT = 3;
 const TRICK_LOOKBACK_LIMIT = 16;
 const HAND_GROUP_CHAIN_MS = 250;
+const ID_HOVERCARD_HIDE_DELAY_MS = 120;
 const SVG_CARDS_SPRITE_PATH = "/cards/svg-cards/svg-cards.svg";
 const SVG_CARD_VIEWBOX = "0 0 169.075 244.64";
 const SESSION_MODE_PLAYER = "player";
@@ -70,6 +72,10 @@ const el = {
   promptInfo: document.getElementById("promptInfo"),
   errorBox: document.getElementById("errorBox"),
   actionToast: document.getElementById("actionToast"),
+  appMetaVersion: document.getElementById("appMetaVersion"),
+  debugPanel: document.getElementById("debugPanel"),
+  tablePlayersDetail: document.getElementById("tablePlayersDetail"),
+  latestStateJsonTree: document.getElementById("latestStateJsonTree"),
   readyCta: document.getElementById("readyCta"),
   readyBtn: document.getElementById("readyBtn"),
   readyFlowRow: document.getElementById("readyFlowRow"),
@@ -113,11 +119,19 @@ let tf = window.i18n && window.i18n.tf
 let actionToastTimer = null;
 let lobbyRefreshTimer = null;
 let lobbyRefreshInFlight = false;
+let debugPanelUnlocked = false;
 let playerNameModalResolver = null;
 let createTableModalResolver = null;
 let layoutRenderFrameId = 0;
 let layoutSettleTimer = null;
 let lastLayoutRenderKey = "";
+let idHovercardRoot = null;
+let idHovercardLabel = null;
+let idHovercardValue = null;
+let idHovercardAnchor = null;
+let idHovercardPoint = null;
+let idHovercardPinned = false;
+let idHovercardHideTimer = null;
 /** @type {{ type: 'select'|'deselect', groupKey: string, timerId: ReturnType<typeof setTimeout> } | null} */
 let handGroupChainState = null;
 
@@ -193,6 +207,177 @@ function clearTableRenderCache() {
   renderCache.topPlaySig = null;
   renderCache.historySig = null;
   renderCache.trickFeedSig = null;
+}
+
+function isTouchPointerMode() {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  return window.matchMedia(TOUCH_POINTER_MEDIA_QUERY).matches;
+}
+
+function ensureIdHovercard() {
+  if (idHovercardRoot) return;
+  const root = document.createElement("div");
+  root.className = "id-hovercard hidden";
+  root.setAttribute("aria-hidden", "true");
+  const label = document.createElement("div");
+  label.className = "id-hovercard-label";
+  const value = document.createElement("div");
+  value.className = "id-hovercard-value mono";
+  root.appendChild(label);
+  root.appendChild(value);
+  root.addEventListener("mouseenter", () => {
+    if (!idHovercardPinned) {
+      cancelIdHovercardHide();
+    }
+  });
+  root.addEventListener("mouseleave", () => {
+    if (!idHovercardPinned) {
+      scheduleIdHovercardHide();
+    }
+  });
+  root.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+  });
+  document.body.appendChild(root);
+  idHovercardRoot = root;
+  idHovercardLabel = label;
+  idHovercardValue = value;
+}
+
+function cancelIdHovercardHide() {
+  if (idHovercardHideTimer) {
+    clearTimeout(idHovercardHideTimer);
+    idHovercardHideTimer = null;
+  }
+}
+
+function hideIdHovercard() {
+  cancelIdHovercardHide();
+  if (!idHovercardRoot) return;
+  idHovercardRoot.classList.add("hidden");
+  idHovercardRoot.setAttribute("aria-hidden", "true");
+  idHovercardAnchor = null;
+  idHovercardPoint = null;
+  idHovercardPinned = false;
+}
+
+function scheduleIdHovercardHide() {
+  cancelIdHovercardHide();
+  idHovercardHideTimer = setTimeout(() => {
+    hideIdHovercard();
+  }, ID_HOVERCARD_HIDE_DELAY_MS);
+}
+
+function positionIdHovercard(anchor) {
+  if (!idHovercardRoot || !anchor) return;
+  const margin = 10;
+  const gap = 6;
+  const cardWidth = idHovercardRoot.offsetWidth;
+  const cardHeight = idHovercardRoot.offsetHeight;
+  const maxLeft = Math.max(margin, window.innerWidth - cardWidth - margin);
+  let left = margin;
+  let top = margin;
+  if (idHovercardPoint && Number.isFinite(idHovercardPoint.x) && Number.isFinite(idHovercardPoint.y)) {
+    left = Math.min(Math.max(idHovercardPoint.x + 10, margin), maxLeft);
+    top = idHovercardPoint.y - cardHeight - 10;
+    if (top < margin) {
+      top = idHovercardPoint.y + 12;
+    }
+  } else {
+    const rect = anchor.getBoundingClientRect();
+    const preferredLeft = rect.right - cardWidth + 4;
+    left = Math.min(Math.max(preferredLeft, margin), maxLeft);
+    top = rect.top - cardHeight - gap;
+    if (top < margin) {
+      top = rect.bottom + gap;
+    }
+  }
+  if (top + cardHeight > window.innerHeight - margin) {
+    top = Math.max(margin, window.innerHeight - cardHeight - margin);
+  }
+  idHovercardRoot.style.left = `${Math.round(left)}px`;
+  idHovercardRoot.style.top = `${Math.round(top)}px`;
+}
+
+function showIdHovercard(anchor, kind, idValue, options = {}) {
+  const value = String(idValue || "").trim();
+  if (!anchor || !value) return;
+  ensureIdHovercard();
+  cancelIdHovercardHide();
+  idHovercardPinned = Boolean(options.pinned);
+  idHovercardAnchor = anchor;
+  idHovercardPoint = options.point && Number.isFinite(options.point.x) && Number.isFinite(options.point.y)
+    ? { x: options.point.x, y: options.point.y }
+    : null;
+  idHovercardLabel.textContent = kind;
+  idHovercardValue.textContent = `Id: ${value}`;
+  idHovercardRoot.classList.remove("hidden");
+  idHovercardRoot.setAttribute("aria-hidden", "false");
+  positionIdHovercard(anchor);
+  window.requestAnimationFrame(() => {
+    if (idHovercardAnchor === anchor && idHovercardRoot && !idHovercardRoot.classList.contains("hidden")) {
+      positionIdHovercard(anchor);
+    }
+  });
+}
+
+function bindIdHovercardTrigger(node, kind, idValue) {
+  if (!node) return;
+  const value = String(idValue || "").trim();
+  node.classList.toggle("id-hover-trigger", Boolean(value));
+  node.dataset.idHovercardKind = kind;
+  node.dataset.idHovercardValue = value;
+  if (node.dataset.idHovercardBound === "1") return;
+  node.dataset.idHovercardBound = "1";
+  node.addEventListener("mouseenter", (ev) => {
+    if (isTouchPointerMode()) return;
+    const hoverKind = String(node.dataset.idHovercardKind || "").trim();
+    const hoverValue = String(node.dataset.idHovercardValue || "").trim();
+    if (!hoverValue) return;
+    showIdHovercard(node, hoverKind, hoverValue, {
+      pinned: false,
+      point: { x: ev.clientX, y: ev.clientY },
+    });
+  });
+  node.addEventListener("mouseleave", () => {
+    if (isTouchPointerMode()) return;
+    scheduleIdHovercardHide();
+  });
+  node.addEventListener("click", (ev) => {
+    const hoverKind = String(node.dataset.idHovercardKind || "").trim();
+    const hoverValue = String(node.dataset.idHovercardValue || "").trim();
+    if (!hoverValue) return;
+    if (!isTouchPointerMode()) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const rootVisible = idHovercardRoot && !idHovercardRoot.classList.contains("hidden");
+    const sameAnchor = idHovercardAnchor === node;
+    if (rootVisible && sameAnchor && idHovercardPinned) {
+      hideIdHovercard();
+      return;
+    }
+    showIdHovercard(node, hoverKind, hoverValue, {
+      pinned: true,
+      point: { x: ev.clientX, y: ev.clientY },
+    });
+  });
+}
+
+function syncIdHovercardAnchor() {
+  if (!idHovercardAnchor) return;
+  if (!document.body.contains(idHovercardAnchor)) {
+    hideIdHovercard();
+    return;
+  }
+  if (idHovercardAnchor instanceof HTMLElement && idHovercardAnchor.offsetParent === null) {
+    hideIdHovercard();
+    return;
+  }
+  if (idHovercardRoot && !idHovercardRoot.classList.contains("hidden")) {
+    positionIdHovercard(idHovercardAnchor);
+  }
 }
 
 if (!state.preferredPlayerName && state.session?.playerName) {
@@ -390,6 +575,28 @@ function showActionToast(message, durationMs = 2200) {
     el.actionToast.textContent = "";
     actionToastTimer = null;
   }, durationMs);
+}
+
+async function renderFooterMeta() {
+  if (!el.appMetaVersion) return;
+  try {
+    const { json } = await apiFetch("/ping", { method: "GET" });
+    const ver = String(json?.ver || "").trim();
+    if (!ver) {
+      el.appMetaVersion.textContent = t("footerVersionUnavailable");
+      return;
+    }
+    el.appMetaVersion.textContent = tf("footerVersion", { ver });
+  } catch (_err) {
+    el.appMetaVersion.textContent = t("footerVersionUnavailable");
+  }
+}
+
+function revealDebugPanel() {
+  if (!el.debugPanel || debugPanelUnlocked) return;
+  debugPanelUnlocked = true;
+  el.debugPanel.classList.remove("hidden");
+  el.debugPanel.open = true;
 }
 
 function stopLobbyAutoRefresh() {
@@ -1219,6 +1426,7 @@ function buildTrickFeedPlayerCard(table, seat, mySeat) {
   const name = document.createElement("div");
   name.className = "trick-feed-player-name";
   name.textContent = playerNameText(info);
+  bindIdHovercardTrigger(name, "playerId", info?.playerId || "");
   card.appendChild(name);
   return card;
 }
@@ -1423,6 +1631,7 @@ function buildSeatCard(table, seat, info, actorPlayerIds, mySeat, finishRankBySe
   const title = document.createElement("div");
   title.className = "seat-title";
   title.textContent = playerNameText(info);
+  bindIdHovercardTrigger(title, "playerId", info?.playerId || "");
   const isAway = String(info?.presence || "").toLowerCase() === "away";
   const dot = document.createElement("span");
   dot.className = `seat-ready-dot ${isAway ? "away" : info.ready ? "ready" : ""}`;
@@ -1541,6 +1750,133 @@ function resolveNarrationText(rawNarration) {
   return raw;
 }
 
+function debugBoolText(value) {
+  return value ? t("debugBoolTrue") : t("debugBoolFalse");
+}
+
+function debugSeatPresenceText(info) {
+  if (!info?.playerId) return t("stateIdle");
+  const presence = String(info?.presence || "").trim();
+  if (!presence) {
+    return info?.ready ? t("stateReady") : t("stateWaiting");
+  }
+  const normalized = presence.toLowerCase();
+  if (normalized === "away") return t("stateAway");
+  if (normalized === "ready") return t("stateReady");
+  return presence;
+}
+
+function renderPlayersDetail(table, finishRankBySeat) {
+  if (!el.tablePlayersDetail) return;
+  el.tablePlayersDetail.innerHTML = "";
+  for (const seat of SEATS) {
+    const info = table?.seats?.[seat] || null;
+    const isOccupied = Boolean(info?.playerId);
+    const remainingNum = Number(info?.remainingCount);
+    const remainingText = isOccupied && Number.isFinite(remainingNum) ? String(remainingNum) : "-";
+    const finishRankLabel = finishRankText(finishRankBySeat.get(seat));
+    const line = document.createElement("div");
+    line.className = "debug-player-line mono";
+    line.textContent = tf("debugPlayerLine", {
+      seat,
+      playerId: isOccupied ? String(info.playerId) : "-",
+      playerName: isOccupied ? playerNameText(info) : t("seatEmptyPlayer"),
+      playerType: isOccupied ? String(info?.playerType || "-") : "-",
+      playerModel: isOccupied ? String(info?.playerModel || "-") : "-",
+      ready: isOccupied ? debugBoolText(Boolean(info?.ready)) : "-",
+      presence: debugSeatPresenceText(info),
+      remaining: remainingText,
+      rank: finishRankLabel || "-",
+    });
+    el.tablePlayersDetail.appendChild(line);
+  }
+}
+
+function formatDebugJsonScalar(value) {
+  if (value === null) return "null";
+  if (value === undefined) return "undefined";
+  if (typeof value === "string") return `"${value}"`;
+  return String(value);
+}
+
+function createDebugJsonLine(label, value, className = "", useRawText = false) {
+  const line = document.createElement("div");
+  line.className = "debug-json-line";
+  if (label !== null && label !== undefined) {
+    const keyEl = document.createElement("span");
+    keyEl.className = "debug-json-key";
+    keyEl.textContent = `${label}:`;
+    line.appendChild(keyEl);
+  }
+  const valueEl = document.createElement("span");
+  valueEl.className = `debug-json-value ${className}`.trim();
+  valueEl.textContent = useRawText ? String(value) : formatDebugJsonScalar(value);
+  line.appendChild(valueEl);
+  return line;
+}
+
+function createDebugJsonNode(label, value, depth = 0) {
+  if (value === null || value === undefined || typeof value !== "object") {
+    const valueClass = value === null ? "is-null" : typeof value === "string" ? "is-string" : "";
+    return createDebugJsonLine(label, value, valueClass);
+  }
+
+  const isArray = Array.isArray(value);
+  const entries = isArray
+    ? value.map((item, index) => [String(index), item])
+    : Object.entries(value);
+  if (!entries.length) {
+    return createDebugJsonLine(label, isArray ? "[]" : "{}", "is-empty", true);
+  }
+
+  const details = document.createElement("details");
+  details.className = "debug-json-node";
+  details.open = depth === 0;
+  const summary = document.createElement("summary");
+  summary.className = "debug-json-summary";
+  const summaryLabel = document.createElement("span");
+  summaryLabel.className = "debug-json-key";
+  summaryLabel.textContent = String(label ?? "value");
+  summary.appendChild(summaryLabel);
+  const summaryMeta = document.createElement("span");
+  summaryMeta.className = "debug-json-meta";
+  summaryMeta.textContent = isArray ? `[${entries.length}]` : `{${entries.length}}`;
+  summary.appendChild(summaryMeta);
+  details.appendChild(summary);
+
+  const children = document.createElement("div");
+  children.className = "debug-json-children";
+  entries.forEach(([key, item]) => {
+    children.appendChild(createDebugJsonNode(key, item, depth + 1));
+  });
+  details.appendChild(children);
+  return details;
+}
+
+function renderLatestStateJson() {
+  if (!el.latestStateJsonTree) return;
+  el.latestStateJsonTree.innerHTML = "";
+  const latestState = {
+    tableState: state.tableState,
+    privateView: state.privateView,
+    expect: state.expect,
+    prompt: state.prompt,
+    session: state.session,
+  };
+  const hasAnyData = Object.values(latestState).some((value) => {
+    if (value === null || value === undefined) return false;
+    if (typeof value === "string") return value.length > 0;
+    return true;
+  });
+  if (!hasAnyData) {
+    el.latestStateJsonTree.textContent = t("debugJsonEmpty");
+    return;
+  }
+  Object.entries(latestState).forEach(([key, value]) => {
+    el.latestStateJsonTree.appendChild(createDebugJsonNode(key, value));
+  });
+}
+
 function tableTitleText(tableState, tableItem) {
   const name = String(tableState?.name || tableItem?.name || "").trim();
   if (name) return name;
@@ -1648,7 +1984,7 @@ function renderTables() {
     tableId.className = "table-id";
     const tableDisplayTitle = tableTitleText(tableState, item);
     tableId.textContent = tableDisplayTitle;
-    tableId.title = tableDisplayTitle;
+    bindIdHovercardTrigger(tableId, "tableId", tableState.tableId || item.tableId || "");
     const badge = document.createElement("div");
     badge.className = "table-badge";
     const badgeText = tf("tableCardBadge", {
@@ -1718,7 +2054,7 @@ function renderTables() {
         name.className = "seat-name";
         const displaySeatName = player.playerName || "-";
         name.textContent = displaySeatName;
-        name.title = displaySeatName;
+        bindIdHovercardTrigger(name, "playerId", player.playerId || "");
         const status = document.createElement("div");
         const isAway = String(player?.presence || "").toLowerCase() === "away";
         const ready = Boolean(player.ready);
@@ -1787,6 +2123,7 @@ function renderTables() {
   el.tablesList.appendChild(createCard);
 
   el.tablesEmptyHint.classList.toggle("hidden", state.tables.length > 0);
+  syncIdHovercardAnchor();
 }
 
 function render() {
@@ -1808,6 +2145,9 @@ function render() {
     : t("tableLegalActionsNone");
 
   const table = state.tableState;
+  const finishRankBySeat = table ? buildFinishRankBySeat(table) : new Map();
+  renderPlayersDetail(table, finishRankBySeat);
+  renderLatestStateJson();
   if (!table) {
     clearTableRenderCache();
     el.portraitSeatOverview.classList.add("hidden");
@@ -1828,6 +2168,7 @@ function render() {
     el.portraitTableInPlayTitle.removeAttribute("title");
     el.portraitTableInPlayTitle.classList.add("hidden");
     el.portraitTableInPlayTitle.setAttribute("aria-hidden", "true");
+    hideIdHovercard();
     el.tableTurnInfo.textContent = "";
     el.seatGrid.innerHTML = "";
     el.privateHand.innerHTML = "";
@@ -1849,9 +2190,9 @@ function render() {
   });
   const inPlayTitle = tableTitleText(table, null);
   el.tableInPlayTitle.textContent = inPlayTitle;
-  el.tableInPlayTitle.title = inPlayTitle;
   el.portraitTableInPlayTitle.textContent = inPlayTitle;
-  el.portraitTableInPlayTitle.title = inPlayTitle;
+  bindIdHovercardTrigger(el.tableInPlayTitle, "tableId", table.tableId || "");
+  bindIdHovercardTrigger(el.portraitTableInPlayTitle, "tableId", table.tableId || "");
   const mySeat = getMySeat(table);
   const portraitMode = isPortraitPhoneTableMode();
   const feedMode = shouldShowTableScene() && shouldUseTrickFeedMode(table, mySeat);
@@ -1879,7 +2220,6 @@ function render() {
     el.tableNarration.classList.add("hidden");
   }
   el.tableTurnInfo.textContent = actorDisplayText(table);
-  const finishRankBySeat = buildFinishRankBySeat(table);
   if (portraitMode) {
     renderPortraitSeatOverview(table, mySeat, finishRankBySeat);
   } else {
@@ -1980,6 +2320,7 @@ function render() {
   el.tributeRow.classList.toggle("hidden", !caps.canOperate || !canTribute);
   el.returnRow.classList.toggle("hidden", !caps.canOperate || !canReturnCard);
   lastLayoutRenderKey = computeLayoutRenderKey();
+  syncIdHovercardAnchor();
 }
 
 async function init() {
@@ -1989,6 +2330,11 @@ async function init() {
     if (!state.selectedHandIndexes.size) return;
     state.selectedHandIndexes.clear();
     syncPrivateHandSelection();
+  });
+  el.appMetaVersion?.addEventListener("dblclick", (ev) => {
+    ev.preventDefault();
+    if (!shouldShowTableScene()) return;
+    revealDebugPanel();
   });
 
   document.addEventListener("i18n:changed", () => {
@@ -2011,6 +2357,7 @@ async function init() {
     } else {
       setConnection(t("connIdle"));
     }
+    renderFooterMeta();
   });
 
   el.refreshTablesBtn.addEventListener("click", () => {
@@ -2120,6 +2467,10 @@ async function init() {
   });
 
   document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && idHovercardRoot && !idHovercardRoot.classList.contains("hidden")) {
+      hideIdHovercard();
+      return;
+    }
     if (ev.key === "Escape" && playerNameModalResolver) {
       closePlayerNameModal("");
       return;
@@ -2139,14 +2490,30 @@ async function init() {
       refreshLobbyAuto();
     }
   });
+  document.addEventListener("click", (ev) => {
+    if (!idHovercardRoot || idHovercardRoot.classList.contains("hidden")) return;
+    const target = ev.target;
+    if (!(target instanceof Element)) return;
+    if (idHovercardRoot.contains(target)) return;
+    if (target.closest(".id-hover-trigger")) return;
+    hideIdHovercard();
+  });
 
-  window.addEventListener("resize", scheduleLayoutRender);
+  window.addEventListener("resize", () => {
+    scheduleLayoutRender();
+    syncIdHovercardAnchor();
+  });
+  window.addEventListener("scroll", syncIdHovercardAnchor, true);
   window.addEventListener("orientationchange", () => {
     scheduleLayoutRender();
     scheduleLayoutRenderAfterSettle();
+    syncIdHovercardAnchor();
   });
   if (window.visualViewport) {
-    window.visualViewport.addEventListener("resize", scheduleLayoutRender);
+    window.visualViewport.addEventListener("resize", () => {
+      scheduleLayoutRender();
+      syncIdHovercardAnchor();
+    });
   }
 
   await refreshLobby().catch((err) => setError(err.message));
@@ -2160,6 +2527,7 @@ async function init() {
     startPolling();
   }
   render();
+  await renderFooterMeta();
 }
 
 init();
