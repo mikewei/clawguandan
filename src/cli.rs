@@ -449,10 +449,10 @@ pub(crate) enum Top {
         #[command(subcommand)]
         cmd: PlayCmd,
     },
-    /// Full-table automation via subprocess CLI only (see `simulate cliplay`)
-    Simulate {
+    /// Full-table automation via subprocess CLI only (see `bot beat-it`)
+    Bot {
         #[command(subcommand)]
-        cmd: SimulateCmd,
+        cmd: BotCmd,
     },
     /// Show embedded reference material (no server required)
     Show {
@@ -472,9 +472,9 @@ pub(crate) enum ShowCmd {
 }
 
 #[derive(Subcommand)]
-pub(crate) enum SimulateCmd {
-    /// Simulate via CLI subprocesses. Optionally target an existing table; otherwise create one.
-    Cliplay {
+pub(crate) enum BotCmd {
+    /// Run bots via CLI subprocesses. Optionally target an existing table; otherwise create one.
+    BeatIt {
         /// Optional existing table ID to join. If omitted, creates a fresh table.
         #[arg(short = 't', long)]
         table: Option<String>,
@@ -755,8 +755,8 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 }),
             ),
         },
-        Top::Simulate { cmd } => match cmd {
-            SimulateCmd::Cliplay {
+        Top::Bot { cmd } => match cmd {
+            BotCmd::BeatIt {
                 table,
                 rank,
                 players,
@@ -2151,7 +2151,7 @@ impl CliplayShared {
         }
         *last = Some(tr_seq);
         let n = self.hands_done.fetch_add(1, Ordering::SeqCst) + 1;
-        println!("\n--- simulate cliplay: hand {n} completed (transition seq={tr_seq}) ---");
+        println!("\n--- bot beat-it: hand {n} completed (transition seq={tr_seq}) ---");
         if n >= self.hands_target {
             self.stop.store(true, Ordering::SeqCst);
         }
@@ -2193,7 +2193,7 @@ fn simulate_cliplay_subprocess(
     }
     let bin = std::env::current_exe().map_err(|e| e.to_string())?;
 
-    println!("--- simulate cliplay: hands={hands} (observer + bots; subprocess CLI; auto-seq) ---");
+    println!("--- bot beat-it: hands={hands} (observer + bots; subprocess CLI; auto-seq) ---");
 
     let table_id = if let Some(tid) = table {
         if rank.is_some() {
@@ -2206,7 +2206,7 @@ fn simulate_cliplay_subprocess(
         let mut create_args = vec![
             "table".to_string(),
             "create".to_string(),
-            "simulate-cliplay".to_string(),
+            "bot-beat-it".to_string(),
         ];
         if let Some(rank) = rank.as_deref() {
             create_args.push("--rank".to_string());
@@ -2276,7 +2276,7 @@ fn simulate_cliplay_subprocess(
         ));
     }
     println!(
-        "\n--- simulate cliplay: table_id={table_id} occupied={occupied} vacancy={vacancy} target_join={target_join} ---"
+        "\n--- bot beat-it: table_id={table_id} occupied={occupied} vacancy={vacancy} target_join={target_join} ---"
     );
 
     // Reset observer auto-seq baseline to current head to avoid replaying historical scoring
@@ -2500,7 +2500,7 @@ fn simulate_cliplay_subprocess(
                 let kind = expect.get("kind").and_then(|x| x.as_str()).unwrap_or("");
                 if let Some(actor) = expect_has_uncontrolled_actor(&expect, &controlled_pids) {
                     shared.fail(format!(
-                        "{prefix}: actor {actor} is not controlled by simulate cliplay (join_only mode). controlled_bot_ids=[{controlled_pids_text}]"
+                        "{prefix}: actor {actor} is not controlled by bot beat-it (join_only mode). controlled_bot_ids=[{controlled_pids_text}]"
                     ));
                     break;
                 }
@@ -2609,7 +2609,7 @@ fn simulate_cliplay_subprocess(
 
     for h in handles {
         h.join()
-            .map_err(|_| "simulate cliplay: thread panicked".to_string())?;
+            .map_err(|_| "bot beat-it: thread panicked".to_string())?;
     }
 
     if let Some(e) = shared.err.lock().unwrap().take() {
@@ -2618,7 +2618,7 @@ fn simulate_cliplay_subprocess(
 
     let base = load_active_server_base()?;
     let last_seq = read_session_last_applied_seq_observer(&base, &table_id)?.unwrap_or(0);
-    println!("\n=== simulate cliplay done. table_id={table_id} observer_last_seq={last_seq} ===");
+    println!("\n=== bot beat-it done. table_id={table_id} observer_last_seq={last_seq} ===");
     Ok(())
 }
 

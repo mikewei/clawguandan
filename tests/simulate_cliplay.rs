@@ -1,4 +1,4 @@
-//! `simulate cliplay` argv helpers (fast) and optional full subprocess E2E (ignored by default).
+//! `bot beat-it` argv helpers (fast) and optional full subprocess E2E (ignored by default).
 
 use clawguandan::simulation::{
     cli_argv_play_suggest, cli_argv_play_wait4myturn, cli_argv_table_nextstate,
@@ -130,9 +130,9 @@ fn cli_argv_table_snapshot_optional_player() {
 #[test]
 fn simulate_cliplay_help_includes_table_and_players_flags() {
     let out = Command::new(cargo_bin())
-        .args(["simulate", "cliplay", "--help"])
+        .args(["bot", "beat-it", "--help"])
         .output()
-        .expect("simulate cliplay --help");
+        .expect("bot beat-it --help");
     assert!(
         out.status.success(),
         "help failed: {}",
@@ -143,7 +143,7 @@ fn simulate_cliplay_help_includes_table_and_players_flags() {
     assert!(help.contains("--players"));
 }
 
-/// Spawns a real server and runs `clawguandan simulate cliplay` (slow; subprocess per step).
+/// Spawns a real server and runs `clawguandan bot beat-it` (slow; subprocess per step).
 #[test]
 #[ignore = "manual / CI optional: requires free port and ~minutes for one full hand"]
 fn simulate_cliplay_one_hand_exits_zero() {
@@ -197,9 +197,9 @@ fn simulate_cliplay_one_hand_exits_zero() {
 
     let sim = Command::new(cargo_bin())
         .env("HOME", home)
-        .args(["simulate", "cliplay", "--players", "4", "--hands", "1"])
+        .args(["bot", "beat-it", "--players", "4", "--hands", "1"])
         .output()
-        .expect("simulate cliplay");
+        .expect("bot beat-it");
 
     let _ = server.kill();
     let mut stderr = String::new();
@@ -209,7 +209,7 @@ fn simulate_cliplay_one_hand_exits_zero() {
 
     assert!(
         sim.status.success(),
-        "simulate cliplay failed: stdout={} stderr={} server_stderr={}",
+        "bot beat-it failed: stdout={} stderr={} server_stderr={}",
         String::from_utf8_lossy(&sim.stdout),
         String::from_utf8_lossy(&sim.stderr),
         stderr
@@ -217,7 +217,7 @@ fn simulate_cliplay_one_hand_exits_zero() {
 
     let out = String::from_utf8_lossy(&sim.stdout);
     assert!(
-        out.contains("simulate cliplay done"),
+        out.contains("bot beat-it done"),
         "expected completion banner, got: {out}"
     );
 }
@@ -274,8 +274,8 @@ fn simulate_cliplay_existing_table_with_players_flag() {
     let sim = Command::new(cargo_bin())
         .env("HOME", home)
         .args([
-            "simulate",
-            "cliplay",
+            "bot",
+            "beat-it",
             "--table",
             &table_id,
             "--players",
@@ -284,17 +284,17 @@ fn simulate_cliplay_existing_table_with_players_flag() {
             "1",
         ])
         .output()
-        .expect("simulate cliplay");
+        .expect("bot beat-it");
 
     let _ = server.kill();
     assert!(
         sim.status.success(),
-        "simulate cliplay failed: stdout={} stderr={}",
+        "bot beat-it failed: stdout={} stderr={}",
         String::from_utf8_lossy(&sim.stdout),
         String::from_utf8_lossy(&sim.stderr)
     );
     let out = String::from_utf8_lossy(&sim.stdout);
-    assert!(out.contains("simulate cliplay done"));
+    assert!(out.contains("bot beat-it done"));
 }
 
 #[test]
@@ -361,9 +361,9 @@ fn simulate_cliplay_existing_full_table_without_players_fails() {
 
     let sim = Command::new(cargo_bin())
         .env("HOME", home)
-        .args(["simulate", "cliplay", "--table", &table_id, "--hands", "1"])
+        .args(["bot", "beat-it", "--table", &table_id, "--hands", "1"])
         .output()
-        .expect("simulate cliplay");
+        .expect("bot beat-it");
 
     let _ = server.kill();
     assert!(
