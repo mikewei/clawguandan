@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand};
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -586,9 +586,9 @@ pub(crate) enum BotCmd {
         /// Number of hands to complete (each ends in scoring). If omitted, runs until game end.
         #[arg(long)]
         hands: Option<u32>,
-        /// Print every subprocess command and its stdout/stderr (default: compact logs only)
-        #[arg(short, long)]
-        verbose: bool,
+        /// Increase log verbosity (`-v` summary, `-vv` subprocess stdout, `-vvv` +stderr/raw transition)
+        #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+        verbosity: u8,
     },
     /// Run rule-based bots via subprocess runtime. Optionally target an existing table; otherwise create one.
     RuleBot {
@@ -604,9 +604,9 @@ pub(crate) enum BotCmd {
         /// Number of hands to complete (each ends in scoring). If omitted, runs until game end.
         #[arg(long)]
         hands: Option<u32>,
-        /// Print every subprocess command and its stdout/stderr (default: compact logs only)
-        #[arg(short, long)]
-        verbose: bool,
+        /// Increase log verbosity (`-v` summary, `-vv` subprocess stdout, `-vvv` +stderr/raw transition)
+        #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+        verbosity: u8,
     },
     /// Run LLM-driven bots: each decision invokes `ask_llm.sh` (stdin prompt, stdout markers).
     LlmBot {
@@ -622,9 +622,9 @@ pub(crate) enum BotCmd {
         /// Number of hands to complete (each ends in scoring). If omitted, runs until game end.
         #[arg(long)]
         hands: Option<u32>,
-        /// Print every subprocess command and its stdout/stderr (default: compact logs only)
-        #[arg(short, long)]
-        verbose: bool,
+        /// Increase log verbosity (`-v` summary, `-vv` subprocess stdout, `-vvv` +stderr/raw transition)
+        #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
+        verbosity: u8,
         /// Path to user script (e.g. `ask_llm.sh`): read UTF-8 prompt from stdin, write markers to stdout.
         #[arg(long)]
         ask_llm: PathBuf,
@@ -924,21 +924,21 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 rank,
                 players,
                 hands,
-                verbose,
-            } => simulate_cliplay_subprocess(table, rank, players, hands, verbose),
+                verbosity,
+            } => simulate_cliplay_subprocess(table, rank, players, hands, verbosity),
             BotCmd::RuleBot {
                 table,
                 rank,
                 players,
                 hands,
-                verbose,
-            } => simulate_rule_bot_subprocess(table, rank, players, hands, verbose),
+                verbosity,
+            } => simulate_rule_bot_subprocess(table, rank, players, hands, verbosity),
             BotCmd::LlmBot {
                 table,
                 rank,
                 players,
                 hands,
-                verbose,
+                verbosity,
                 ask_llm,
                 llm_timeout_ms,
                 llm_name_bots,
@@ -947,7 +947,7 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 rank,
                 players,
                 hands,
-                verbose,
+                verbosity,
                 ask_llm,
                 llm_timeout_ms,
                 llm_name_bots,
@@ -2517,7 +2517,7 @@ fn simulate_cliplay_subprocess(
     rank: Option<String>,
     players: Option<u8>,
     hands: Option<u32>,
-    verbose: bool,
+    verbosity: u8,
 ) -> Result<(), String> {
     run_bot_subprocess(
         BotRunOptions {
@@ -2525,7 +2525,7 @@ fn simulate_cliplay_subprocess(
             rank,
             players,
             hands,
-            verbose,
+            verbosity,
         },
         Arc::new(BeatItPlugin),
     )
@@ -2536,7 +2536,7 @@ fn simulate_rule_bot_subprocess(
     rank: Option<String>,
     players: Option<u8>,
     hands: Option<u32>,
-    verbose: bool,
+    verbosity: u8,
 ) -> Result<(), String> {
     run_bot_subprocess(
         BotRunOptions {
@@ -2544,7 +2544,7 @@ fn simulate_rule_bot_subprocess(
             rank,
             players,
             hands,
-            verbose,
+            verbosity,
         },
         Arc::new(RuleBotPlugin::default()),
     )
@@ -2555,7 +2555,7 @@ fn simulate_llm_subprocess(
     rank: Option<String>,
     players: Option<u8>,
     hands: Option<u32>,
-    verbose: bool,
+    verbosity: u8,
     ask_llm: PathBuf,
     llm_timeout_ms: Option<u64>,
     llm_name_bots: bool,
@@ -2567,13 +2567,13 @@ fn simulate_llm_subprocess(
             rank,
             players,
             hands,
-            verbose,
+            verbosity,
         },
         Arc::new(LlmBotPlugin::new(LlmBotParams {
             script: ask_llm,
             timeout: Duration::from_millis(timeout_ms),
             name_bots: llm_name_bots,
-            verbose,
+            verbose: verbosity >= 2,
         })),
     )
 }

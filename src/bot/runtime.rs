@@ -8,7 +8,10 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::bot::plugin::{BotDecision, BotPlugin, BotTurnContext, JoinNamesContext};
-use crate::bot::policies::default_display_names_for_plugin;
+use crate::bot::policies::{
+    ObserverGameOverContext, ObserverGameStartContext, ObserverHandOverContext,
+    ObserverHandStartContext, default_display_names_for_plugin,
+};
 use crate::domain::TableState;
 use crate::game::engine::PlayerAction;
 use crate::simulation::run_cli_command;
@@ -22,7 +25,21 @@ pub struct BotRunOptions {
     pub rank: Option<String>,
     pub players: Option<u8>,
     pub hands: Option<u32>,
-    pub verbose: bool,
+    pub verbosity: u8,
+}
+
+impl BotRunOptions {
+    fn show_summary(&self) -> bool {
+        self.verbosity >= 1
+    }
+
+    fn show_cli_io(&self) -> bool {
+        self.verbosity >= 2
+    }
+
+    fn show_cli_stderr(&self) -> bool {
+        self.verbosity >= 3
+    }
 }
 
 struct RuntimeShared {
@@ -32,7 +49,6 @@ struct RuntimeShared {
     hands_done: AtomicU32,
     hands_target: Option<u32>,
     err: Mutex<Option<String>>,
-    bot_label: String,
 }
 
 impl RuntimeShared {
@@ -44,34 +60,36 @@ impl RuntimeShared {
         self.stop.store(true, Ordering::SeqCst);
     }
 
-    fn on_transition_maybe_scoring(&self, v: &Value) {
+    fn on_transition_maybe_scoring(&self, v: &Value) -> Option<(u32, u64, String)> {
         if !transition_counts_as_hand_done(v) {
-            return;
+            return None;
         }
         let Some(tr_seq) = v.get("seq").and_then(|x| x.as_u64()) else {
-            return;
+            return None;
         };
         if tr_seq <= self.start_seq {
-            return;
+            return None;
         }
         let mut last = self.last_scoring_transition_seq.lock().unwrap();
         if *last == Some(tr_seq) {
-            return;
+            return None;
         }
         *last = Some(tr_seq);
         let n = self.hands_done.fetch_add(1, Ordering::SeqCst) + 1;
-        println!(
-            "\n--- {}: hand {n} completed (transition seq={tr_seq}) ---",
-            self.bot_label
-        );
+        let tr_type = v
+            .get("type")
+            .and_then(|x| x.as_str())
+            .unwrap_or("UNKNOWN")
+            .to_string();
         if let Some(hands_target) = self.hands_target
             && n >= hands_target
         {
             self.stop.store(true, Ordering::SeqCst);
         }
+        Some((n, tr_seq, tr_type))
     }
 
-    fn on_transition_maybe_terminal(&self, v: &Value) {
+    fn on_transition_maybe_terminal(&self, v: &Value) -> bool {
         let terminal_by_type =
             v.get("type").and_then(|x| x.as_str()) == Some("GAME_COMPLETED");
         let terminal_by_delta = v
@@ -87,7 +105,9 @@ impl RuntimeShared {
             .unwrap_or(false);
         if terminal_by_type || terminal_by_delta {
             self.stop.store(true, Ordering::SeqCst);
+            return true;
         }
+        false
     }
 }
 
@@ -104,30 +124,16 @@ pub fn run_bot_subprocess(
 
     let bot_label = format!("bot {}", plugin.plugin_id());
     let bin = std::env::current_exe().map_err(|e| e.to_string())?;
-    let hands_display = opts
-        .hands
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| "until-game-end".to_string());
-    if opts.verbose {
-        println!(
-            "--- {bot_label}: hands={} (observer + bots; subprocess CLI; auto-seq) ---",
-            hands_display
-        );
-    } else {
-        println!(
-            "--- {bot_label}: hands={} (compact log; use -v for subprocess I/O) ---",
-            hands_display
-        );
-    }
+    let show_cli_io = opts.show_cli_io();
+    let show_cli_stderr = opts.show_cli_stderr();
+    let observer_policy = plugin.observer_policy();
 
     let table_id = if let Some(tid) = opts.table.clone() {
         if opts.rank.is_some() {
             return Err("--rank is only allowed when creating a new table (omit --table)".into());
         }
-        if opts.verbose {
+        if show_cli_io {
             println!("\n### [table target]\nusing existing table: {tid}");
-        } else {
-            println!("--- {bot_label}: using existing table_id={tid} ---");
         }
         tid
     } else {
@@ -141,12 +147,12 @@ pub fn run_bot_subprocess(
             create_args.push("--rank".to_string());
             create_args.push(rank.to_string());
         }
-        if opts.verbose {
+        if show_cli_io {
             println!("\n### [{label}]\n$ clawguandan {}", create_args.join(" "));
         }
         let out = run_cli_command(&bin, &create_args).map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&out.stdout);
-        if opts.verbose {
+        if show_cli_io {
             println!("<< stdout:\n{stdout}");
         }
         let create_v = parse_cli_stdout_json(&out.stdout)?;
@@ -155,8 +161,11 @@ pub fn run_bot_subprocess(
             .or_else(|| create_v["table_id"].as_str())
             .ok_or_else(|| "create: missing tableId".to_string())?
             .to_string();
-        if !opts.verbose {
-            println!("--- {bot_label}: created table_id={tid} ---");
+        if show_cli_stderr {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if !stderr.trim().is_empty() {
+                println!("<< stderr:\n{stderr}");
+            }
         }
         tid
     };
@@ -167,7 +176,7 @@ pub fn run_bot_subprocess(
         "-t".to_string(),
         table_id.clone(),
     ];
-    if opts.verbose {
+    if show_cli_io {
         println!(
             "\n### [table snapshot]\n$ clawguandan {}",
             snapshot_args.join(" ")
@@ -175,8 +184,14 @@ pub fn run_bot_subprocess(
     }
     let snapshot_out = run_cli_command(&bin, &snapshot_args).map_err(|e| e.to_string())?;
     let snapshot_stdout = String::from_utf8_lossy(&snapshot_out.stdout);
-    if opts.verbose {
+    if show_cli_io {
         println!("<< stdout:\n{snapshot_stdout}");
+    }
+    if show_cli_stderr {
+        let stderr = String::from_utf8_lossy(&snapshot_out.stderr);
+        if !stderr.trim().is_empty() {
+            println!("<< stderr:\n{stderr}");
+        }
     }
     let snapshot = parse_cli_stdout_json(&snapshot_out.stdout)?;
     let snapshot_state: TableState =
@@ -216,9 +231,6 @@ pub fn run_bot_subprocess(
             "requested --players {target_join}, but only {vacancy} seat(s) are available on table {table_id}"
         ));
     }
-    println!(
-        "--- {bot_label}: table_id={table_id} occupied={occupied} vacancy={vacancy} join_bots={target_join} ---"
-    );
 
     let observer_name = {
         let s = Uuid::new_v4().to_string();
@@ -228,19 +240,6 @@ pub fn run_bot_subprocess(
             .expect("uuid v4 string is hyphenated");
         format!("{}{}", observer_session_prefix(plugin.plugin_id()), frag)
     };
-    println!("--- {bot_label}: observer_session={observer_name} ---");
-
-    let last_narration_raw: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
-    if !opts.verbose {
-        let raw = snapshot_state.narration.trim();
-        if !raw.is_empty() {
-            let line = narration_display_en(raw);
-            if !line.is_empty() {
-                println!("[narration] {line}");
-                *last_narration_raw.lock().unwrap() = Some(raw.to_string());
-            }
-        }
-    }
 
     let join_ctx = JoinNamesContext {
         plugin_id: plugin.plugin_id().to_string(),
@@ -271,13 +270,19 @@ pub fn run_bot_subprocess(
             "--seat".to_string(),
             "auto".to_string(),
         ];
-        if opts.verbose {
+        if show_cli_io {
             println!("\n### [{label}]\n$ clawguandan {}", args.join(" "));
         }
         let out = run_cli_command(&bin, &args).map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&out.stdout);
-        if opts.verbose {
+        if show_cli_io {
             println!("<< stdout:\n{stdout}");
+        }
+        if show_cli_stderr {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if !stderr.trim().is_empty() {
+                println!("<< stderr:\n{stderr}");
+            }
         }
         let j = parse_cli_stdout_json(&out.stdout)?;
         let pid = j["playerId"]
@@ -286,13 +291,6 @@ pub fn run_bot_subprocess(
             .to_string();
         pids.push(pid);
     }
-    if !opts.verbose && !pids.is_empty() {
-        println!(
-            "--- {bot_label}: joined {} bot(s), sent ready ---",
-            pids.len()
-        );
-    }
-
     for (i, pid) in pids.iter().enumerate() {
         let label = format!("play ready bot{i}");
         let args = vec![
@@ -303,13 +301,19 @@ pub fn run_bot_subprocess(
             "-p".to_string(),
             pid.clone(),
         ];
-        if opts.verbose {
+        if show_cli_io {
             println!("\n### [{label}]\n$ clawguandan {}", args.join(" "));
         }
         let out = run_cli_command(&bin, &args).map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&out.stdout);
-        if opts.verbose {
+        if show_cli_io {
             println!("<< stdout:\n{stdout}");
+        }
+        if show_cli_stderr {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            if !stderr.trim().is_empty() {
+                println!("<< stderr:\n{stderr}");
+            }
         }
         let _j = parse_cli_stdout_json(&out.stdout)?;
     }
@@ -323,7 +327,6 @@ pub fn run_bot_subprocess(
         hands_done: AtomicU32::new(0),
         hands_target: opts.hands,
         err: Mutex::new(None),
-        bot_label: bot_label.clone(),
     });
 
     let mut handles = Vec::new();
@@ -332,9 +335,22 @@ pub fn run_bot_subprocess(
     let table_id_obs = table_id.clone();
     let observer_name_obs = observer_name.clone();
     let shared_obs = Arc::clone(&shared);
-    let last_narr_obs = Arc::clone(&last_narration_raw);
-    let plugin_obs = Arc::clone(&plugin);
-    let verbose_obs = opts.verbose;
+    let observer_policy_obs = Arc::clone(&observer_policy);
+    let verbosity_obs = opts.verbosity;
+    let show_cli_io_obs = opts.show_cli_io();
+    let show_cli_stderr_obs = opts.show_cli_stderr();
+    let plugin_id_obs = plugin.plugin_id().to_string();
+    let game_start_ctx = ObserverGameStartContext {
+        plugin_id: plugin_id_obs.clone(),
+        table_id: table_id.clone(),
+        observer_name: observer_name.clone(),
+        transition_seq: 0,
+        hands_target: opts.hands,
+        occupied,
+        vacancy,
+        join_bots: target_join,
+        verbosity: opts.verbosity,
+    };
     handles.push(thread::spawn(move || loop {
         if shared_obs.stop.load(Ordering::SeqCst) {
             break;
@@ -349,7 +365,7 @@ pub fn run_bot_subprocess(
             "--timeout-ms".to_string(),
             NEXTSTATE_TIMEOUT_MS.to_string(),
         ];
-        if verbose_obs {
+        if show_cli_io_obs {
             println!("\n### [observer] $ clawguandan {}", argv.join(" "));
         }
         let out = match run_cli_command(&bin_obs, &argv) {
@@ -373,9 +389,9 @@ pub fn run_bot_subprocess(
         };
         let out_txt = String::from_utf8_lossy(&out.stdout);
         let err_txt = String::from_utf8_lossy(&out.stderr);
-        if verbose_obs {
+        if show_cli_io_obs {
             println!("<< [observer] stdout:\n{out_txt}");
-            if !err_txt.trim().is_empty() {
+            if show_cli_stderr_obs && !err_txt.trim().is_empty() {
                 println!("<< [observer] stderr:\n{err_txt}");
             }
         }
@@ -389,23 +405,81 @@ pub fn run_bot_subprocess(
                 break;
             }
         };
-        if let Err(e) = plugin_obs.observer_policy().on_transition(&v) {
+        if let Err(e) = observer_policy_obs.on_transition(&v, verbosity_obs) {
             shared_obs.fail(format!("observer plugin hook: {e}"));
             break;
         }
-        if !verbose_obs && let Some(raw) = last_narration_from_nextstate_json(&v) {
-            let mut g = last_narr_obs.lock().unwrap();
-            let changed = g.as_ref().map(|s| s.as_str()) != Some(raw.as_str());
-            if changed {
-                let disp = narration_display_en(&raw);
-                if !disp.is_empty() {
-                    println!("[narration] {disp}");
-                }
-                *g = Some(raw);
+        let tr_type = v
+            .get("type")
+            .and_then(|x| x.as_str())
+            .unwrap_or("UNKNOWN")
+            .to_string();
+        if tr_type == "GAME_STARTED" {
+            let mut start_ctx = game_start_ctx.clone();
+            start_ctx.transition_seq = v.get("seq").and_then(|x| x.as_u64()).unwrap_or_default();
+            if let Err(e) = observer_policy_obs.on_game_start(&start_ctx) {
+                shared_obs.fail(format!("observer plugin hook: {e}"));
+                break;
             }
         }
-        shared_obs.on_transition_maybe_scoring(&v);
-        shared_obs.on_transition_maybe_terminal(&v);
+        if tr_type == "GAME_STARTED" || tr_type == "NEXT_HAND_STARTED" {
+            let hand_index = shared_obs.hands_done.load(Ordering::SeqCst) + 1;
+            let ctx = ObserverHandStartContext {
+                plugin_id: plugin_id_obs.clone(),
+                table_id: table_id_obs.clone(),
+                hand_index,
+                transition_seq: v.get("seq").and_then(|x| x.as_u64()).unwrap_or_default(),
+                transition_type: tr_type.clone(),
+                verbosity: verbosity_obs,
+            };
+            if let Err(e) = observer_policy_obs.on_hand_start(&ctx) {
+                shared_obs.fail(format!("observer plugin hook: {e}"));
+                break;
+            }
+        }
+        if let Some((hand_index, tr_seq, tr_type)) = shared_obs.on_transition_maybe_scoring(&v) {
+            let ctx = ObserverHandOverContext {
+                plugin_id: plugin_id_obs.clone(),
+                table_id: table_id_obs.clone(),
+                hand_index,
+                transition_seq: tr_seq,
+                transition_type: tr_type.clone(),
+                verbosity: verbosity_obs,
+            };
+            if let Err(e) = observer_policy_obs.on_hand_over(&ctx) {
+                shared_obs.fail(format!("observer plugin hook: {e}"));
+                break;
+            }
+            if tr_type == "GAME_COMPLETED" {
+                let game_over_ctx = ObserverGameOverContext {
+                    plugin_id: plugin_id_obs.clone(),
+                    table_id: table_id_obs.clone(),
+                    hands_done: hand_index,
+                    transition_seq: tr_seq,
+                    transition_type: tr_type.clone(),
+                    verbosity: verbosity_obs,
+                };
+                if let Err(e) = observer_policy_obs.on_game_over(&game_over_ctx) {
+                    shared_obs.fail(format!("observer plugin hook: {e}"));
+                    break;
+                }
+            }
+        }
+        let terminal = shared_obs.on_transition_maybe_terminal(&v);
+        if terminal && tr_type != "GAME_COMPLETED" {
+            let game_over_ctx = ObserverGameOverContext {
+                plugin_id: plugin_id_obs.clone(),
+                table_id: table_id_obs.clone(),
+                hands_done: shared_obs.hands_done.load(Ordering::SeqCst),
+                transition_seq: v.get("seq").and_then(|x| x.as_u64()).unwrap_or_default(),
+                transition_type: tr_type,
+                verbosity: verbosity_obs,
+            };
+            if let Err(e) = observer_policy_obs.on_game_over(&game_over_ctx) {
+                shared_obs.fail(format!("observer plugin hook: {e}"));
+                break;
+            }
+        }
         if shared_obs.stop.load(Ordering::SeqCst) {
             break;
         }
@@ -418,8 +492,11 @@ pub fn run_bot_subprocess(
         let controlled_pids_bot = Arc::clone(&controlled_pids);
         let controlled_pids_text_bot = controlled_pids_text.clone();
         let prefix = format!("bot{i}");
-        let verbose_bot = opts.verbose;
         let plugin_bot = Arc::clone(&plugin);
+        let plugin_id_bot = plugin_bot.plugin_id().to_string();
+        let show_summary_bot = opts.show_summary();
+        let show_cli_io_bot = opts.show_cli_io();
+        let show_cli_stderr_bot = opts.show_cli_stderr();
         handles.push(thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(50 * i as u64));
             let mut steps: u64 = 0;
@@ -445,7 +522,7 @@ pub fn run_bot_subprocess(
                     "--timeout-ms".to_string(),
                     NEXTSTATE_TIMEOUT_MS.to_string(),
                 ];
-                if verbose_bot {
+                if show_cli_io_bot {
                     println!("\n### [{prefix}] $ clawguandan {}", argv.join(" "));
                 }
                 let out = match run_cli_command(&bin_bot, &argv) {
@@ -469,9 +546,9 @@ pub fn run_bot_subprocess(
                 };
                 let out_txt = String::from_utf8_lossy(&out.stdout);
                 let err_txt = String::from_utf8_lossy(&out.stderr);
-                if verbose_bot {
+                if show_cli_io_bot {
                     println!("<< [{prefix}] stdout:\n{out_txt}");
-                    if !err_txt.trim().is_empty() {
+                    if show_cli_stderr_bot && !err_txt.trim().is_empty() {
                         println!("<< [{prefix}] stderr:\n{err_txt}");
                     }
                 }
@@ -538,7 +615,10 @@ pub fn run_bot_subprocess(
                     &pid,
                     &decision,
                     &prefix,
-                    verbose_bot,
+                    &plugin_id_bot,
+                    show_summary_bot,
+                    show_cli_io_bot,
+                    show_cli_stderr_bot,
                 );
                 if let Err(e) = run_result {
                     shared_bot.fail(e);
@@ -559,9 +639,11 @@ pub fn run_bot_subprocess(
         return Err(e);
     }
 
-    println!(
-        "\n=== {bot_label} done. table_id={table_id} observer_name={observer_name} start_seq={start_seq} ==="
-    );
+    if opts.show_summary() {
+        println!(
+            "=== {bot_label} done. table_id={table_id} observer_name={observer_name} start_seq={start_seq} ==="
+        );
+    }
     Ok(())
 }
 
@@ -571,10 +653,19 @@ fn run_decision_action(
     player_id: &str,
     decision: &BotDecision,
     prefix: &str,
-    verbose: bool,
+    plugin_id: &str,
+    show_summary: bool,
+    show_cli_io: bool,
+    show_cli_stderr: bool,
 ) -> Result<(), String> {
     match decision {
         BotDecision::Ready => {
+            if show_summary {
+                println!(
+                    "[{plugin_id}][I][player:ready] player={} table={}",
+                    player_id, table_id
+                );
+            }
             let argv = vec![
                 "play".to_string(),
                 "ready".to_string(),
@@ -583,7 +674,7 @@ fn run_decision_action(
                 "-p".to_string(),
                 player_id.to_string(),
             ];
-            run_cli_with_log(bin, argv, prefix, verbose, "ready")
+            run_cli_with_log(bin, argv, prefix, show_cli_io, show_cli_stderr, "ready")
         }
         BotDecision::UseSuggest => {
             let sargv = vec![
@@ -594,7 +685,8 @@ fn run_decision_action(
                 "-p".to_string(),
                 player_id.to_string(),
             ];
-            let sug_out = run_cli_with_capture(bin, sargv, prefix, verbose, "suggest")?;
+            let sug_out =
+                run_cli_with_capture(bin, sargv, prefix, show_cli_io, show_cli_stderr, "suggest")?;
             let sug = parse_cli_stdout_json(&sug_out.stdout)?;
             let action_type = sug
                 .get("actionType")
@@ -603,40 +695,82 @@ fn run_decision_action(
             let payload = sug.get("payload").cloned().unwrap_or(json!({}));
             let action = PlayerAction::try_from_action_type_payload(action_type, &payload)
                 .map_err(|e| format!("{prefix}: suggest parse: {e}"))?;
+            if show_summary {
+                println!(
+                    "[{plugin_id}][I][player:action] player={} table={} via=suggest action={}",
+                    player_id,
+                    table_id,
+                    player_action_summary(&action)
+                );
+            }
             let argv = player_action_to_cli_argv_auto(&action, table_id, player_id);
-            run_cli_with_log(bin, argv, prefix, verbose, "action")
+            run_cli_with_log(bin, argv, prefix, show_cli_io, show_cli_stderr, "action")
         }
         BotDecision::Action(action) => {
+            if show_summary {
+                println!(
+                    "[{plugin_id}][I][player:action] player={} table={} via=policy action={}",
+                    player_id,
+                    table_id,
+                    player_action_summary(action)
+                );
+            }
             let argv = player_action_to_cli_argv_auto(action, table_id, player_id);
-            run_cli_with_log(bin, argv, prefix, verbose, "action")
+            run_cli_with_log(bin, argv, prefix, show_cli_io, show_cli_stderr, "action")
         }
     }
 
+}
+
+fn player_action_summary(action: &PlayerAction) -> String {
+    match action {
+        PlayerAction::Pass => "pass".to_string(),
+        PlayerAction::Tribute { card } => format!("tribute:{card}"),
+        PlayerAction::ReturnCard { card } => format!("return:{card}"),
+        PlayerAction::Play {
+            cards,
+            wild_targets,
+        } => {
+            let mut base = format!("play:{}", cards.join(","));
+            if let Some(wt) = wild_targets && !wt.is_empty() {
+                base.push_str(&format!(" wild={}", wt.join(",")));
+            }
+            base
+        }
+    }
 }
 
 fn run_cli_with_log(
     bin: &std::path::Path,
     argv: Vec<String>,
     prefix: &str,
-    verbose: bool,
+    show_cli_io: bool,
+    show_cli_stderr: bool,
     op: &str,
 ) -> Result<(), String> {
-    run_cli_with_capture(bin, argv, prefix, verbose, op).map(|_| ())
+    run_cli_with_capture(bin, argv, prefix, show_cli_io, show_cli_stderr, op).map(|_| ())
 }
 
 fn run_cli_with_capture(
     bin: &std::path::Path,
     argv: Vec<String>,
     prefix: &str,
-    verbose: bool,
+    show_cli_io: bool,
+    show_cli_stderr: bool,
     op: &str,
 ) -> Result<std::process::Output, String> {
-    if verbose {
+    if show_cli_io {
         println!("\n### [{prefix}] $ clawguandan {}", argv.join(" "));
     }
     let out = run_cli_command(bin, &argv).map_err(|e| format!("{prefix}: {op}: {e}"))?;
-    if verbose {
+    if show_cli_io {
         println!("<< [{prefix}] stdout:\n{}", String::from_utf8_lossy(&out.stdout));
+    }
+    if show_cli_stderr {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if !stderr.trim().is_empty() {
+            println!("<< [{prefix}] stderr:\n{stderr}");
+        }
     }
     Ok(out)
 }
@@ -770,32 +904,3 @@ fn player_action_to_cli_argv_auto(
     }
 }
 
-fn last_narration_from_nextstate_json(v: &Value) -> Option<String> {
-    let ops = v.get("delta")?.get("ops")?.as_array()?;
-    let mut out: Option<String> = None;
-    for op in ops {
-        if op.get("op").and_then(|x| x.as_str()) == Some("replace")
-            && op.get("path").and_then(|x| x.as_str()) == Some("/narration")
-            && let Some(val) = op.get("value")
-        {
-            out = Some(match val {
-                Value::String(s) => s.clone(),
-                _ => val.to_string(),
-            });
-        }
-    }
-    out
-}
-
-fn narration_display_en(raw: &str) -> String {
-    let t = raw.trim();
-    if t.is_empty() {
-        return String::new();
-    }
-    if let Ok(v) = serde_json::from_str::<Value>(t)
-        && let Some(en) = v.get("en").and_then(|x| x.as_str())
-    {
-        return en.trim().to_string();
-    }
-    t.to_string()
-}

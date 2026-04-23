@@ -22,7 +22,7 @@ pub struct LlmBotParams {
     pub script: std::path::PathBuf,
     pub timeout: Duration,
     pub name_bots: bool,
-    /// When true (e.g. `clawguandan bot llm-bot -v`), log each `ask_llm.sh` invocation and decisions.
+    /// When true (e.g. `clawguandan bot llm-bot -vv`), log each `ask_llm.sh` invocation and decisions.
     pub verbose: bool,
 }
 

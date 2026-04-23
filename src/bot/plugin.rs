@@ -52,6 +52,6 @@ pub trait BotPlugin: Send + Sync {
     }
 
     fn observer_policy(&self) -> Arc<dyn crate::bot::policies::ObserverPolicy> {
-        crate::bot::policies::noop_observer()
+        crate::bot::policies::default_observer()
     }
 }
