@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::game::engine::PlayerAction;
 use serde_json::Value;
 
@@ -16,16 +18,40 @@ pub struct BotTurnContext {
     pub state: Value,
 }
 
-pub trait BotPlugin: Send + Sync {
-    fn name(&self) -> &'static str;
+/// Context for optional per-plugin join display names.
+#[derive(Clone, Debug)]
+pub struct JoinNamesContext {
+    pub plugin_id: String,
+    pub table_id: String,
+    pub count: usize,
+    pub snapshot: Option<Value>,
+}
 
-    fn observer_prefix(&self) -> &'static str {
-        "bot"
+pub trait BotPlugin: Send + Sync {
+    /// Stable machine-facing id (session dirs, logging); not the same as join display names.
+    fn plugin_id(&self) -> &'static str;
+
+    fn ready_policy(&self) -> Arc<dyn crate::bot::policies::ReadyPolicy> {
+        crate::bot::policies::always_ready()
     }
 
-    fn decide(&self, ctx: &BotTurnContext) -> Result<BotDecision, String>;
+    fn tribute_policy(&self) -> Arc<dyn crate::bot::policies::TributePolicy> {
+        crate::bot::policies::always_suggest_tribute()
+    }
 
-    fn on_observer_transition(&self, _transition: &Value) -> Result<(), String> {
-        Ok(())
+    fn exchange_policy(&self) -> Arc<dyn crate::bot::policies::ExchangePolicy> {
+        crate::bot::policies::always_suggest_exchange()
+    }
+
+    fn play_policy(&self) -> Arc<dyn crate::bot::policies::PlayPolicy> {
+        crate::bot::policies::always_suggest_play()
+    }
+
+    fn name_policy(&self) -> Arc<dyn crate::bot::policies::NamePolicy> {
+        crate::bot::policies::default_name()
+    }
+
+    fn observer_policy(&self) -> Arc<dyn crate::bot::policies::ObserverPolicy> {
+        crate::bot::policies::noop_observer()
     }
 }

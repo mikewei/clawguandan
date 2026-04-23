@@ -7,7 +7,8 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-use crate::bot::plugin::{BotDecision, BotPlugin, BotTurnContext};
+use crate::bot::plugin::{BotDecision, BotPlugin, BotTurnContext, JoinNamesContext};
+use crate::bot::policies::default_display_names_for_plugin;
 use crate::domain::TableState;
 use crate::game::engine::PlayerAction;
 use crate::simulation::run_cli_command;
@@ -20,7 +21,7 @@ pub struct BotRunOptions {
     pub table: Option<String>,
     pub rank: Option<String>,
     pub players: Option<u8>,
-    pub hands: u32,
+    pub hands: Option<u32>,
     pub verbose: bool,
 }
 
@@ -29,7 +30,7 @@ struct RuntimeShared {
     start_seq: u64,
     last_scoring_transition_seq: Mutex<Option<u64>>,
     hands_done: AtomicU32,
-    hands_target: u32,
+    hands_target: Option<u32>,
     err: Mutex<Option<String>>,
     bot_label: String,
 }
@@ -63,7 +64,9 @@ impl RuntimeShared {
             "\n--- {}: hand {n} completed (transition seq={tr_seq}) ---",
             self.bot_label
         );
-        if n >= self.hands_target {
+        if let Some(hands_target) = self.hands_target
+            && n >= hands_target
+        {
             self.stop.store(true, Ordering::SeqCst);
         }
     }
@@ -92,24 +95,28 @@ pub fn run_bot_subprocess(
     opts: BotRunOptions,
     plugin: Arc<dyn BotPlugin>,
 ) -> Result<(), String> {
-    if opts.hands == 0 {
-        return Err("--hands must be >= 1".into());
+    if opts.hands == Some(0) {
+        return Err("--hands must be >= 1 when provided".into());
     }
     if let Some(n) = opts.players && n > 4 {
         return Err("--players must be <= 4".into());
     }
 
-    let bot_label = format!("bot {}", plugin.name());
+    let bot_label = format!("bot {}", plugin.plugin_id());
     let bin = std::env::current_exe().map_err(|e| e.to_string())?;
+    let hands_display = opts
+        .hands
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "until-game-end".to_string());
     if opts.verbose {
         println!(
             "--- {bot_label}: hands={} (observer + bots; subprocess CLI; auto-seq) ---",
-            opts.hands
+            hands_display
         );
     } else {
         println!(
             "--- {bot_label}: hands={} (compact log; use -v for subprocess I/O) ---",
-            opts.hands
+            hands_display
         );
     }
 
@@ -128,7 +135,7 @@ pub fn run_bot_subprocess(
         let mut create_args = vec![
             "table".to_string(),
             "create".to_string(),
-            format!("bot-{}", plugin.name()),
+            format!("bot-{}", plugin.plugin_id()),
         ];
         if let Some(rank) = opts.rank.as_deref() {
             create_args.push("--rank".to_string());
@@ -219,7 +226,7 @@ pub fn run_bot_subprocess(
             .split('-')
             .next()
             .expect("uuid v4 string is hyphenated");
-        format!("{}{}", plugin.observer_prefix(), frag)
+        format!("{}{}", observer_session_prefix(plugin.plugin_id()), frag)
     };
     println!("--- {bot_label}: observer_session={observer_name} ---");
 
@@ -235,16 +242,32 @@ pub fn run_bot_subprocess(
         }
     }
 
+    let join_ctx = JoinNamesContext {
+        plugin_id: plugin.plugin_id().to_string(),
+        table_id: table_id.clone(),
+        count: target_join,
+        snapshot: Some(snapshot.clone()),
+    };
+    let display_names: Vec<String> =
+        match plugin.name_policy().join_display_names(&join_ctx) {
+            Ok(v) if v.len() == target_join => v,
+            _ => default_display_names_for_plugin(plugin.plugin_id(), target_join),
+        };
+
     let mut pids: Vec<String> = Vec::new();
     for i in 0..target_join {
         let label = format!("table join bot{i}");
+        let bot_name = display_names
+            .get(i)
+            .cloned()
+            .unwrap_or_else(|| format!("bot{i}"));
         let args = vec![
             "table".to_string(),
             "join".to_string(),
             "-t".to_string(),
             table_id.clone(),
             "--name".to_string(),
-            format!("bot{i}"),
+            bot_name,
             "--seat".to_string(),
             "auto".to_string(),
         ];
@@ -366,7 +389,7 @@ pub fn run_bot_subprocess(
                 break;
             }
         };
-        if let Err(e) = plugin_obs.on_observer_transition(&v) {
+        if let Err(e) = plugin_obs.observer_policy().on_transition(&v) {
             shared_obs.fail(format!("observer plugin hook: {e}"));
             break;
         }
@@ -477,7 +500,7 @@ pub fn run_bot_subprocess(
                 if let Some(actor) = expect_has_uncontrolled_actor(&expect, &controlled_pids_bot) {
                     shared_bot.fail(format!(
                         "{prefix}: actor {actor} is not controlled by {}. controlled_bot_ids=[{controlled_pids_text_bot}]",
-                        plugin_bot.name()
+                        plugin_bot.plugin_id()
                     ));
                     break;
                 }
@@ -494,7 +517,15 @@ pub fn run_bot_subprocess(
                     expect_kind: kind.to_string(),
                     state: state.clone(),
                 };
-                let decision = match plugin_bot.decide(&ctx) {
+                let decision_result = match kind {
+                    "ready" => plugin_bot.ready_policy().decide_ready(&ctx),
+                    "tribute" => plugin_bot.tribute_policy().decide_tribute(&ctx),
+                    "exchange" => plugin_bot.exchange_policy().decide_exchange(&ctx),
+                    "play" => plugin_bot.play_policy().decide_play(&ctx),
+                    // Align with previous RuleBotPlugin fallback (`_ => UseSuggest`).
+                    _ => plugin_bot.play_policy().decide_play(&ctx),
+                };
+                let decision = match decision_result {
                     Ok(d) => d,
                     Err(e) => {
                         shared_bot.fail(format!("{prefix}: plugin decision: {e}"));
@@ -580,6 +611,7 @@ fn run_decision_action(
             run_cli_with_log(bin, argv, prefix, verbose, "action")
         }
     }
+
 }
 
 fn run_cli_with_log(
@@ -613,6 +645,19 @@ fn parse_cli_stdout_json(out: &[u8]) -> Result<Value, String> {
     let s = String::from_utf8_lossy(out);
     let t = s.trim();
     serde_json::from_str(t).map_err(|e| format!("invalid JSON from CLI: {e}; got: {t:?}"))
+}
+
+/// Observer session directory prefix derived from [`BotPlugin::plugin_id`]; path-safe for CLI session dirs.
+fn observer_session_prefix(plugin_id: &str) -> String {
+    let mut s: String = plugin_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .collect();
+    if s.is_empty() {
+        s = "bot".into();
+    }
+    s.make_ascii_lowercase();
+    s
 }
 
 fn nextstate_stdout_is_no_content(stdout: &[u8]) -> bool {

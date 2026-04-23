@@ -535,14 +535,22 @@ impl TableStore {
         if outcome.winner_team.is_some() {
             inner.state.status = TableStatus::Finished;
             inner.state.waiting_next_hand_ready = false;
-            inner.state.narration = format_hand_end(&finish_names, ew_level, sn_level, false, true);
+            inner.state.narration = format_hand_end(
+                &finish_names,
+                ew_level,
+                sn_level,
+                false,
+                true,
+                outcome.winner_team,
+            );
             if let Some(g) = inner.state.game.as_mut() {
                 g.phase = GamePhase::Completed;
             }
             inner.state.sync_phase_from_game();
         } else {
             inner.state.waiting_next_hand_ready = true;
-            inner.state.narration = format_hand_end(&finish_names, ew_level, sn_level, true, false);
+            inner.state.narration =
+                format_hand_end(&finish_names, ew_level, sn_level, true, false, None);
         }
 
         inner.state.seq += 1;

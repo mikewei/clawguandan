@@ -20,7 +20,7 @@ use std::time::Duration;
 
 use url::Url;
 
-use clawguandan::bot::plugins::{BeatItPlugin, RuleBotPlugin};
+use clawguandan::bot::plugins::{BeatItPlugin, LlmBotParams, LlmBotPlugin, RuleBotPlugin};
 use clawguandan::bot::{BotRunOptions, run_bot_subprocess};
 use clawguandan::domain::{
     NextStateBody, PrivateView, TableState, TableStatus, apply_transition_delta_to_table_state,
@@ -583,9 +583,9 @@ pub(crate) enum BotCmd {
         /// Number of bots to join. If omitted, auto-fills all current vacancies.
         #[arg(long)]
         players: Option<u8>,
-        /// Number of hands to complete (each ends in scoring)
-        #[arg(long, default_value_t = 1)]
-        hands: u32,
+        /// Number of hands to complete (each ends in scoring). If omitted, runs until game end.
+        #[arg(long)]
+        hands: Option<u32>,
         /// Print every subprocess command and its stdout/stderr (default: compact logs only)
         #[arg(short, long)]
         verbose: bool,
@@ -601,12 +601,39 @@ pub(crate) enum BotCmd {
         /// Number of bots to join. If omitted, auto-fills all current vacancies.
         #[arg(long)]
         players: Option<u8>,
-        /// Number of hands to complete (each ends in scoring)
-        #[arg(long, default_value_t = 1)]
-        hands: u32,
+        /// Number of hands to complete (each ends in scoring). If omitted, runs until game end.
+        #[arg(long)]
+        hands: Option<u32>,
         /// Print every subprocess command and its stdout/stderr (default: compact logs only)
         #[arg(short, long)]
         verbose: bool,
+    },
+    /// Run LLM-driven bots: each decision invokes `ask_llm.sh` (stdin prompt, stdout markers).
+    LlmBot {
+        /// Optional existing table ID to join. If omitted, creates a fresh table.
+        #[arg(short = 't', long)]
+        table: Option<String>,
+        /// Starting rank/level for table creation (2-10, J, Q, K, A). Only valid when creating a new table.
+        #[arg(long)]
+        rank: Option<String>,
+        /// Number of bots to join. If omitted, auto-fills all current vacancies.
+        #[arg(long)]
+        players: Option<u8>,
+        /// Number of hands to complete (each ends in scoring). If omitted, runs until game end.
+        #[arg(long)]
+        hands: Option<u32>,
+        /// Print every subprocess command and its stdout/stderr (default: compact logs only)
+        #[arg(short, long)]
+        verbose: bool,
+        /// Path to user script (e.g. `ask_llm.sh`): read UTF-8 prompt from stdin, write markers to stdout.
+        #[arg(long)]
+        ask_llm: PathBuf,
+        /// Wall-clock timeout per `ask_llm.sh` invocation in milliseconds (default: 120000).
+        #[arg(long)]
+        llm_timeout_ms: Option<u64>,
+        /// Before join, call `ask_llm.sh` once to parse `<<<NAMING:LIST|...>>>` for bot display names.
+        #[arg(long)]
+        llm_name_bots: bool,
     },
 }
 
@@ -906,6 +933,25 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 hands,
                 verbose,
             } => simulate_rule_bot_subprocess(table, rank, players, hands, verbose),
+            BotCmd::LlmBot {
+                table,
+                rank,
+                players,
+                hands,
+                verbose,
+                ask_llm,
+                llm_timeout_ms,
+                llm_name_bots,
+            } => simulate_llm_subprocess(
+                table,
+                rank,
+                players,
+                hands,
+                verbose,
+                ask_llm,
+                llm_timeout_ms,
+                llm_name_bots,
+            ),
         },
         Top::Show { cmd } => match cmd {
             ShowCmd::Rules { lang } => {
@@ -2470,7 +2516,7 @@ fn simulate_cliplay_subprocess(
     table: Option<String>,
     rank: Option<String>,
     players: Option<u8>,
-    hands: u32,
+    hands: Option<u32>,
     verbose: bool,
 ) -> Result<(), String> {
     run_bot_subprocess(
@@ -2489,7 +2535,7 @@ fn simulate_rule_bot_subprocess(
     table: Option<String>,
     rank: Option<String>,
     players: Option<u8>,
-    hands: u32,
+    hands: Option<u32>,
     verbose: bool,
 ) -> Result<(), String> {
     run_bot_subprocess(
@@ -2501,6 +2547,34 @@ fn simulate_rule_bot_subprocess(
             verbose,
         },
         Arc::new(RuleBotPlugin::default()),
+    )
+}
+
+fn simulate_llm_subprocess(
+    table: Option<String>,
+    rank: Option<String>,
+    players: Option<u8>,
+    hands: Option<u32>,
+    verbose: bool,
+    ask_llm: PathBuf,
+    llm_timeout_ms: Option<u64>,
+    llm_name_bots: bool,
+) -> Result<(), String> {
+    let timeout_ms = llm_timeout_ms.unwrap_or(120_000);
+    run_bot_subprocess(
+        BotRunOptions {
+            table,
+            rank,
+            players,
+            hands,
+            verbose,
+        },
+        Arc::new(LlmBotPlugin::new(LlmBotParams {
+            script: ask_llm,
+            timeout: Duration::from_millis(timeout_ms),
+            name_bots: llm_name_bots,
+            verbose,
+        })),
     )
 }
 

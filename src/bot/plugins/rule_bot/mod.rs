@@ -1,97 +1,52 @@
-use crate::bot::plugin::{BotDecision, BotPlugin, BotTurnContext};
-use crate::game::engine::PlayerAction;
+use crate::bot::plugin::BotPlugin;
+use crate::bot::policies::PlayPolicy;
 use std::sync::Arc;
 
-use self::features::extract_rule_features;
 pub use self::params::RuleBotParams;
-use self::scoring::{PlayCandidate, choose_play_candidate};
+use self::play_policy::RulePlayPolicy;
 
 mod features;
 mod params;
+mod play_policy;
 mod scoring;
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct RuleBotPlugin {
-    params: Arc<RuleBotParams>,
+    play: Arc<dyn PlayPolicy>,
 }
 
 impl Default for RuleBotPlugin {
     fn default() -> Self {
-        Self {
-            params: Arc::new(RuleBotParams::default_balanced()),
-        }
+        Self::with_params(RuleBotParams::default_balanced())
     }
 }
 
 impl RuleBotPlugin {
     pub fn with_params(params: RuleBotParams) -> Self {
+        let params = Arc::new(params);
         Self {
-            params: Arc::new(params),
+            play: Arc::new(RulePlayPolicy {
+                params: Arc::clone(&params),
+            }),
         }
     }
 }
 
 impl BotPlugin for RuleBotPlugin {
-    fn name(&self) -> &'static str {
+    fn plugin_id(&self) -> &'static str {
         "rule-bot"
     }
 
-    fn observer_prefix(&self) -> &'static str {
-        "rb"
-    }
-
-    fn decide(&self, ctx: &BotTurnContext) -> Result<BotDecision, String> {
-        match ctx.expect_kind.as_str() {
-            "ready" => return Ok(BotDecision::Ready),
-            "tribute" | "exchange" => return Ok(BotDecision::UseSuggest),
-            "play" => {}
-            _ => return Ok(BotDecision::UseSuggest),
-        };
-
-        let features = extract_rule_features(
-            &ctx.state,
-            self.params.enemy_low_cards_threshold,
-            self.params.endgame_hand_count_threshold,
-        );
-
-        // Hard gate: only pass is legal.
-        if features.can_pass && !features.can_play {
-            return Ok(BotDecision::Action(PlayerAction::Pass));
-        }
-        // Hard gate: cannot pass.
-        if features.can_play && !features.can_pass {
-            return Ok(BotDecision::UseSuggest);
-        }
-
-        let (picked, trace) = choose_play_candidate(&self.params, &features);
-        if self.params.enable_reason_trace {
-            eprintln!(
-                "[rule-bot] hand={} pass_score={:.2} suggest_score={:.2} legal={:?} my_seat={:?} enemy_min={:?} reasons={:?}",
-                features.my_hand_count,
-                trace.pass_score,
-                trace.suggest_score,
-                features.legal_actions,
-                features.my_seat,
-                features.enemy_min_remaining,
-                trace.reasons
-            );
-        }
-        match picked {
-            PlayCandidate::Pass => Ok(BotDecision::Action(PlayerAction::Pass)),
-            PlayCandidate::SuggestPlay => {
-                if self.params.use_suggest_fallback {
-                    Ok(BotDecision::UseSuggest)
-                } else {
-                    Ok(BotDecision::Action(PlayerAction::Pass))
-                }
-            }
-        }
+    fn play_policy(&self) -> Arc<dyn PlayPolicy> {
+        Arc::clone(&self.play)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bot::plugin::{BotDecision, BotTurnContext};
+    use crate::game::engine::PlayerAction;
     use serde_json::json;
 
     fn mk_play_ctx(
@@ -131,7 +86,7 @@ mod tests {
     fn pass_only_is_directly_taken() {
         let bot = RuleBotPlugin::default();
         let ctx = mk_play_ctx(&["pass"], 10, "W", Some("N"), 5);
-        let d = bot.decide(&ctx).unwrap();
+        let d = bot.play_policy().decide_play(&ctx).unwrap();
         assert!(matches!(d, BotDecision::Action(PlayerAction::Pass)));
     }
 
@@ -139,7 +94,7 @@ mod tests {
     fn aggressive_profile_prefers_suggest_when_enemy_is_urgent() {
         let bot = RuleBotPlugin::with_params(RuleBotParams::default_aggressive());
         let ctx = mk_play_ctx(&["play", "pass"], 10, "W", Some("W"), 1);
-        let d = bot.decide(&ctx).unwrap();
+        let d = bot.play_policy().decide_play(&ctx).unwrap();
         assert!(matches!(d, BotDecision::UseSuggest));
     }
 
@@ -147,7 +102,7 @@ mod tests {
     fn supportive_profile_prefers_pass_when_partner_leads() {
         let bot = RuleBotPlugin::with_params(RuleBotParams::default_supportive());
         let ctx = mk_play_ctx(&["play", "pass"], 10, "W", Some("W"), 6);
-        let d = bot.decide(&ctx).unwrap();
+        let d = bot.play_policy().decide_play(&ctx).unwrap();
         assert!(matches!(d, BotDecision::Action(PlayerAction::Pass)));
     }
 
@@ -157,7 +112,7 @@ mod tests {
         p.endgame_hand_count_threshold = 7;
         let bot = RuleBotPlugin::with_params(p);
         let ctx = mk_play_ctx(&["play", "pass"], 5, "W", Some("N"), 5);
-        let d = bot.decide(&ctx).unwrap();
+        let d = bot.play_policy().decide_play(&ctx).unwrap();
         assert!(matches!(d, BotDecision::UseSuggest));
     }
 
@@ -186,7 +141,7 @@ mod tests {
                 }
             }),
         };
-        let d = bot.decide(&ctx).unwrap();
+        let d = bot.play_policy().decide_play(&ctx).unwrap();
         assert!(matches!(d, BotDecision::UseSuggest));
     }
 
@@ -201,7 +156,7 @@ mod tests {
                 "expect": { "kind": "play", "legalActions": ["play"] }
             }),
         };
-        let d = bot.decide(&ctx).unwrap();
+        let d = bot.play_policy().decide_play(&ctx).unwrap();
         assert!(matches!(d, BotDecision::UseSuggest));
     }
 }

@@ -87,8 +87,8 @@ pub fn format_tribute_canceled(opening_player_name: &str) -> String {
 
 fn declarer_phrase(team: TeamId) -> (&'static str, &'static str) {
     match team {
-        TeamId::Ew => ("EW（东西）", "the EW team (East–West)"),
-        TeamId::Sn => ("SN（南北）", "the SN team (South–North)"),
+        TeamId::Ew => ("EW（东西组）", "the EW team (East–West)"),
+        TeamId::Sn => ("SN（南北组）", "the SN team (South–North)"),
     }
 }
 
@@ -97,7 +97,7 @@ pub fn format_hand_open(declarer: TeamId, level_api: &str) -> String {
     let (d_zh, d_en) = declarer_phrase(declarer);
     let lv = level_api.trim();
     bilingual(
-        format!("本局庄家方（declarer）为{}，打{}。", d_zh, lv),
+        format!("本局庄家方为{}，打{}。", d_zh, lv),
         format!("This hand: {} is declarer; hand level {}.", d_en, lv),
     )
 }
@@ -113,7 +113,7 @@ pub fn format_hand_open_with_tribute_canceled(
     let name = safe_name(opening_player_name);
     bilingual(
         format!(
-            "本局庄家方（declarer）为{}，打{}。抗贡（免进贡），由{}先出。",
+            "本局庄家方为{}，打{}。抗贡（免进贡），由{}先出。",
             d_zh, lv, name
         ),
         format!(
@@ -129,6 +129,7 @@ pub fn format_hand_end(
     level_sn: &str,
     waiting_ready: bool,
     game_over: bool,
+    winner_team: Option<TeamId>,
 ) -> String {
     let ranking_zh = if finishing_names.is_empty() {
         "本手结束".to_string()
@@ -143,9 +144,20 @@ pub fn format_hand_end(
     let levels_zh = format!("当前级别 EW {} / SN {} 📈", level_ew, level_sn);
     let levels_en = format!("Levels EW {} / SN {} 📈", level_ew, level_sn);
     if game_over {
+        let final_score_zh = format!("最终成绩 EW {} / SN {}", level_ew, level_sn);
+        let final_score_en = format!("Final score EW {} / SN {}", level_ew, level_sn);
+        let (winner_zh, winner_en) = winner_team
+            .map(winning_team_phrase)
+            .unwrap_or(("未知队伍", "unknown team"));
         bilingual(
-            format!("{}; {}。游戏结束! 🎉", ranking_zh, levels_zh),
-            format!("{}; {}. Game over! 🎉", ranking_en, levels_en),
+            format!(
+                "{}；{}，恭喜获胜队{}，游戏结束！🎉",
+                ranking_zh, final_score_zh, winner_zh
+            ),
+            format!(
+                "{}; {}. Congratulations to the winning team {}. Game over! 🎉",
+                ranking_en, final_score_en, winner_en
+            ),
         )
     } else if waiting_ready {
         bilingual(
@@ -157,6 +169,13 @@ pub fn format_hand_end(
             format!("{}; {}。", ranking_zh, levels_zh),
             format!("{}; {}.", ranking_en, levels_en),
         )
+    }
+}
+
+fn winning_team_phrase(team: TeamId) -> (&'static str, &'static str) {
+    match team {
+        TeamId::Ew => ("EW（东西组）", "EW (East-West)"),
+        TeamId::Sn => ("SN（南北组）", "SN (South-North)"),
     }
 }
 
