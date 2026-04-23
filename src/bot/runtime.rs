@@ -122,7 +122,8 @@ pub fn run_bot_subprocess(
         return Err("--players must be <= 4".into());
     }
 
-    let bot_label = format!("bot {}", plugin.plugin_id());
+    let plugin_id = plugin.plugin_id().to_string();
+    let bot_label = format!("bot {}", plugin_id);
     let bin = std::env::current_exe().map_err(|e| e.to_string())?;
     let show_cli_io = opts.show_cli_io();
     let show_cli_stderr = opts.show_cli_stderr();
@@ -133,7 +134,7 @@ pub fn run_bot_subprocess(
             return Err("--rank is only allowed when creating a new table (omit --table)".into());
         }
         if show_cli_io {
-            println!("\n### [table target]\nusing existing table: {tid}");
+            println!("[{plugin_id}][D][table:target] table={tid}");
         }
         tid
     } else {
@@ -141,19 +142,19 @@ pub fn run_bot_subprocess(
         let mut create_args = vec![
             "table".to_string(),
             "create".to_string(),
-            format!("bot-{}", plugin.plugin_id()),
+            format!("bot-{}", plugin_id),
         ];
         if let Some(rank) = opts.rank.as_deref() {
             create_args.push("--rank".to_string());
             create_args.push(rank.to_string());
         }
         if show_cli_io {
-            println!("\n### [{label}]\n$ clawguandan {}", create_args.join(" "));
+            log_cli_call(&plugin_id, label, &create_args);
         }
         let out = run_cli_command(&bin, &create_args).map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&out.stdout);
         if show_cli_io {
-            println!("<< stdout:\n{stdout}");
+            log_cli_stdout(&plugin_id, label, &stdout);
         }
         let create_v = parse_cli_stdout_json(&out.stdout)?;
         let tid = create_v["tableId"]
@@ -164,7 +165,7 @@ pub fn run_bot_subprocess(
         if show_cli_stderr {
             let stderr = String::from_utf8_lossy(&out.stderr);
             if !stderr.trim().is_empty() {
-                println!("<< stderr:\n{stderr}");
+                log_cli_stderr(&plugin_id, label, &stderr);
             }
         }
         tid
@@ -177,20 +178,17 @@ pub fn run_bot_subprocess(
         table_id.clone(),
     ];
     if show_cli_io {
-        println!(
-            "\n### [table snapshot]\n$ clawguandan {}",
-            snapshot_args.join(" ")
-        );
+        log_cli_call(&plugin_id, "table snapshot", &snapshot_args);
     }
     let snapshot_out = run_cli_command(&bin, &snapshot_args).map_err(|e| e.to_string())?;
     let snapshot_stdout = String::from_utf8_lossy(&snapshot_out.stdout);
     if show_cli_io {
-        println!("<< stdout:\n{snapshot_stdout}");
+        log_cli_stdout(&plugin_id, "table snapshot", &snapshot_stdout);
     }
     if show_cli_stderr {
         let stderr = String::from_utf8_lossy(&snapshot_out.stderr);
         if !stderr.trim().is_empty() {
-            println!("<< stderr:\n{stderr}");
+            log_cli_stderr(&plugin_id, "table snapshot", &stderr);
         }
     }
     let snapshot = parse_cli_stdout_json(&snapshot_out.stdout)?;
@@ -238,11 +236,11 @@ pub fn run_bot_subprocess(
             .split('-')
             .next()
             .expect("uuid v4 string is hyphenated");
-        format!("{}{}", observer_session_prefix(plugin.plugin_id()), frag)
+        format!("{}{}", observer_session_prefix(&plugin_id), frag)
     };
 
     let join_ctx = JoinNamesContext {
-        plugin_id: plugin.plugin_id().to_string(),
+        plugin_id: plugin_id.clone(),
         table_id: table_id.clone(),
         count: target_join,
         snapshot: Some(snapshot.clone()),
@@ -250,7 +248,7 @@ pub fn run_bot_subprocess(
     let display_names: Vec<String> =
         match plugin.name_policy().join_display_names(&join_ctx) {
             Ok(v) if v.len() == target_join => v,
-            _ => default_display_names_for_plugin(plugin.plugin_id(), target_join),
+            _ => default_display_names_for_plugin(&plugin_id, target_join),
         };
 
     let mut pids: Vec<String> = Vec::new();
@@ -271,17 +269,17 @@ pub fn run_bot_subprocess(
             "auto".to_string(),
         ];
         if show_cli_io {
-            println!("\n### [{label}]\n$ clawguandan {}", args.join(" "));
+            log_cli_call(&plugin_id, &label, &args);
         }
         let out = run_cli_command(&bin, &args).map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&out.stdout);
         if show_cli_io {
-            println!("<< stdout:\n{stdout}");
+            log_cli_stdout(&plugin_id, &label, &stdout);
         }
         if show_cli_stderr {
             let stderr = String::from_utf8_lossy(&out.stderr);
             if !stderr.trim().is_empty() {
-                println!("<< stderr:\n{stderr}");
+                log_cli_stderr(&plugin_id, &label, &stderr);
             }
         }
         let j = parse_cli_stdout_json(&out.stdout)?;
@@ -302,17 +300,17 @@ pub fn run_bot_subprocess(
             pid.clone(),
         ];
         if show_cli_io {
-            println!("\n### [{label}]\n$ clawguandan {}", args.join(" "));
+            log_cli_call(&plugin_id, &label, &args);
         }
         let out = run_cli_command(&bin, &args).map_err(|e| e.to_string())?;
         let stdout = String::from_utf8_lossy(&out.stdout);
         if show_cli_io {
-            println!("<< stdout:\n{stdout}");
+            log_cli_stdout(&plugin_id, &label, &stdout);
         }
         if show_cli_stderr {
             let stderr = String::from_utf8_lossy(&out.stderr);
             if !stderr.trim().is_empty() {
-                println!("<< stderr:\n{stderr}");
+                log_cli_stderr(&plugin_id, &label, &stderr);
             }
         }
         let _j = parse_cli_stdout_json(&out.stdout)?;
@@ -339,7 +337,7 @@ pub fn run_bot_subprocess(
     let verbosity_obs = opts.verbosity;
     let show_cli_io_obs = opts.show_cli_io();
     let show_cli_stderr_obs = opts.show_cli_stderr();
-    let plugin_id_obs = plugin.plugin_id().to_string();
+    let plugin_id_obs = plugin_id.clone();
     let game_start_ctx = ObserverGameStartContext {
         plugin_id: plugin_id_obs.clone(),
         table_id: table_id.clone(),
@@ -366,7 +364,7 @@ pub fn run_bot_subprocess(
             NEXTSTATE_TIMEOUT_MS.to_string(),
         ];
         if show_cli_io_obs {
-            println!("\n### [observer] $ clawguandan {}", argv.join(" "));
+            log_cli_call(&plugin_id_obs, "observer", &argv);
         }
         let out = match run_cli_command(&bin_obs, &argv) {
             Ok(o) => o,
@@ -390,9 +388,9 @@ pub fn run_bot_subprocess(
         let out_txt = String::from_utf8_lossy(&out.stdout);
         let err_txt = String::from_utf8_lossy(&out.stderr);
         if show_cli_io_obs {
-            println!("<< [observer] stdout:\n{out_txt}");
+            log_cli_stdout(&plugin_id_obs, "observer", &out_txt);
             if show_cli_stderr_obs && !err_txt.trim().is_empty() {
-                println!("<< [observer] stderr:\n{err_txt}");
+                log_cli_stderr(&plugin_id_obs, "observer", &err_txt);
             }
         }
         if nextstate_stdout_is_no_content(&out.stdout) {
@@ -523,7 +521,7 @@ pub fn run_bot_subprocess(
                     NEXTSTATE_TIMEOUT_MS.to_string(),
                 ];
                 if show_cli_io_bot {
-                    println!("\n### [{prefix}] $ clawguandan {}", argv.join(" "));
+                    log_cli_call(&plugin_id_bot, &prefix, &argv);
                 }
                 let out = match run_cli_command(&bin_bot, &argv) {
                     Ok(o) => o,
@@ -547,9 +545,9 @@ pub fn run_bot_subprocess(
                 let out_txt = String::from_utf8_lossy(&out.stdout);
                 let err_txt = String::from_utf8_lossy(&out.stderr);
                 if show_cli_io_bot {
-                    println!("<< [{prefix}] stdout:\n{out_txt}");
+                    log_cli_stdout(&plugin_id_bot, &prefix, &out_txt);
                     if show_cli_stderr_bot && !err_txt.trim().is_empty() {
-                        println!("<< [{prefix}] stderr:\n{err_txt}");
+                        log_cli_stderr(&plugin_id_bot, &prefix, &err_txt);
                     }
                 }
 
@@ -674,7 +672,15 @@ fn run_decision_action(
                 "-p".to_string(),
                 player_id.to_string(),
             ];
-            run_cli_with_log(bin, argv, prefix, show_cli_io, show_cli_stderr, "ready")
+            run_cli_with_log(
+                bin,
+                argv,
+                prefix,
+                plugin_id,
+                show_cli_io,
+                show_cli_stderr,
+                "ready",
+            )
         }
         BotDecision::UseSuggest => {
             let sargv = vec![
@@ -686,7 +692,15 @@ fn run_decision_action(
                 player_id.to_string(),
             ];
             let sug_out =
-                run_cli_with_capture(bin, sargv, prefix, show_cli_io, show_cli_stderr, "suggest")?;
+                run_cli_with_capture(
+                    bin,
+                    sargv,
+                    prefix,
+                    plugin_id,
+                    show_cli_io,
+                    show_cli_stderr,
+                    "suggest",
+                )?;
             let sug = parse_cli_stdout_json(&sug_out.stdout)?;
             let action_type = sug
                 .get("actionType")
@@ -704,7 +718,15 @@ fn run_decision_action(
                 );
             }
             let argv = player_action_to_cli_argv_auto(&action, table_id, player_id);
-            run_cli_with_log(bin, argv, prefix, show_cli_io, show_cli_stderr, "action")
+            run_cli_with_log(
+                bin,
+                argv,
+                prefix,
+                plugin_id,
+                show_cli_io,
+                show_cli_stderr,
+                "action",
+            )
         }
         BotDecision::Action(action) => {
             if show_summary {
@@ -716,7 +738,15 @@ fn run_decision_action(
                 );
             }
             let argv = player_action_to_cli_argv_auto(action, table_id, player_id);
-            run_cli_with_log(bin, argv, prefix, show_cli_io, show_cli_stderr, "action")
+            run_cli_with_log(
+                bin,
+                argv,
+                prefix,
+                plugin_id,
+                show_cli_io,
+                show_cli_stderr,
+                "action",
+            )
         }
     }
 
@@ -744,35 +774,53 @@ fn run_cli_with_log(
     bin: &std::path::Path,
     argv: Vec<String>,
     prefix: &str,
+    plugin_id: &str,
     show_cli_io: bool,
     show_cli_stderr: bool,
     op: &str,
 ) -> Result<(), String> {
-    run_cli_with_capture(bin, argv, prefix, show_cli_io, show_cli_stderr, op).map(|_| ())
+    run_cli_with_capture(bin, argv, prefix, plugin_id, show_cli_io, show_cli_stderr, op)
+        .map(|_| ())
 }
 
 fn run_cli_with_capture(
     bin: &std::path::Path,
     argv: Vec<String>,
     prefix: &str,
+    plugin_id: &str,
     show_cli_io: bool,
     show_cli_stderr: bool,
     op: &str,
 ) -> Result<std::process::Output, String> {
     if show_cli_io {
-        println!("\n### [{prefix}] $ clawguandan {}", argv.join(" "));
+        log_cli_call(plugin_id, prefix, &argv);
     }
     let out = run_cli_command(bin, &argv).map_err(|e| format!("{prefix}: {op}: {e}"))?;
     if show_cli_io {
-        println!("<< [{prefix}] stdout:\n{}", String::from_utf8_lossy(&out.stdout));
+        log_cli_stdout(plugin_id, prefix, &String::from_utf8_lossy(&out.stdout));
     }
     if show_cli_stderr {
         let stderr = String::from_utf8_lossy(&out.stderr);
         if !stderr.trim().is_empty() {
-            println!("<< [{prefix}] stderr:\n{stderr}");
+            log_cli_stderr(plugin_id, prefix, &stderr);
         }
     }
     Ok(out)
+}
+
+fn log_cli_call(plugin_id: &str, actor: &str, argv: &[String]) {
+    println!(
+        "[{plugin_id}][D][cli:call] actor={actor} cmd=clawguandan {}",
+        argv.join(" ")
+    );
+}
+
+fn log_cli_stdout(plugin_id: &str, actor: &str, stdout: &str) {
+    println!("[{plugin_id}][D][cli:stdout] actor={actor}\n{stdout}");
+}
+
+fn log_cli_stderr(plugin_id: &str, actor: &str, stderr: &str) {
+    println!("[{plugin_id}][T][cli:stderr] actor={actor}\n{stderr}");
 }
 
 fn parse_cli_stdout_json(out: &[u8]) -> Result<Value, String> {
