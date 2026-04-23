@@ -238,7 +238,10 @@ async fn ready_expect_lists_all_unready_actor_ids() {
             .await
             .unwrap();
         let body = read_json(res).await;
-        pids.push(body["playerId"].as_str().unwrap().to_string());
+        let pid = body["playerId"].as_str().unwrap().to_string();
+        let pkey = body["playerKey"].as_str().unwrap().to_string();
+        remember_player_key(&pid, &pkey);
+        pids.push(pid);
     }
 
     let before_ready = snapshot_player(&app, &table_id, &pids[0]).await;
@@ -263,6 +266,7 @@ async fn ready_expect_lists_all_unready_actor_ids() {
                 .body(Body::from(
                     json!({
                         "playerId": &pids[0],
+                        "playerKey": lookup_player_key(&pids[0]).unwrap_or_default(),
                         "ready": true,
                     })
                     .to_string(),
@@ -577,7 +581,13 @@ async fn injected_tribute_exchange_advances_seq_and_reaches_playing() {
                 .uri(format!("/api/v1/tables/{}/actions/tribute", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"playerId": &pids[2], "seq": seq, "card": "♠A"}).to_string(),
+                    json!({
+                        "playerId": &pids[2],
+                        "playerKey": lookup_player_key(&pids[2]).unwrap_or_default(),
+                        "seq": seq,
+                        "card": "♠A"
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -594,7 +604,13 @@ async fn injected_tribute_exchange_advances_seq_and_reaches_playing() {
                 .uri(format!("/api/v1/tables/{}/actions/tribute", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"playerId": &pids[3], "seq": seq, "card": "♦K"}).to_string(),
+                    json!({
+                        "playerId": &pids[3],
+                        "playerKey": lookup_player_key(&pids[3]).unwrap_or_default(),
+                        "seq": seq,
+                        "card": "♦K"
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -614,7 +630,13 @@ async fn injected_tribute_exchange_advances_seq_and_reaches_playing() {
                 .uri(format!("/api/v1/tables/{}/actions/return_card", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"playerId": &pids[0], "seq": seq, "card": "♦5"}).to_string(),
+                    json!({
+                        "playerId": &pids[0],
+                        "playerKey": lookup_player_key(&pids[0]).unwrap_or_default(),
+                        "seq": seq,
+                        "card": "♦5"
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -631,7 +653,13 @@ async fn injected_tribute_exchange_advances_seq_and_reaches_playing() {
                 .uri(format!("/api/v1/tables/{}/actions/return_card", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"playerId": &pids[1], "seq": seq, "card": "♠8"}).to_string(),
+                    json!({
+                        "playerId": &pids[1],
+                        "playerKey": lookup_player_key(&pids[1]).unwrap_or_default(),
+                        "seq": seq,
+                        "card": "♠8"
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -649,10 +677,11 @@ async fn injected_tribute_exchange_advances_seq_and_reaches_playing() {
             Request::builder()
                 .method("GET")
                 .uri(format!(
-                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=50&playerId={}",
+                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=50&playerId={}&playerKey={}",
                     table_id,
                     seq - 1,
-                    pids[0]
+                    pids[0],
+                    lookup_player_key(&pids[0]).unwrap_or_default()
                 ))
                 .body(Body::empty())
                 .unwrap(),
@@ -698,7 +727,13 @@ async fn nextstate_immediate_catch_up_when_behind() {
                 .uri(format!("/api/v1/tables/{}/actions/tribute", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                    json!({"playerId": &pids[2], "seq": seq, "card": "♠A"}).to_string(),
+                    json!({
+                        "playerId": &pids[2],
+                        "playerKey": lookup_player_key(&pids[2]).unwrap_or_default(),
+                        "seq": seq,
+                        "card": "♠A"
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -784,6 +819,7 @@ async fn play_without_declared_mapping_auto_fills_and_logs_mapping() {
                 .body(Body::from(
                     json!({
                         "playerId": &pids[0],
+                        "playerKey": lookup_player_key(&pids[0]).unwrap_or_default(),
                         "seq": seq,
                         "cards": ["♥3", "♠J"]
                     })
@@ -874,6 +910,7 @@ async fn finishing_player_is_recorded_and_next_actor_skips_empty_seat() {
                 .body(Body::from(
                     json!({
                         "playerId": &pids[0],
+                        "playerKey": lookup_player_key(&pids[0]).unwrap_or_default(),
                         "seq": seq,
                         "cards": ["♠3"]
                     })
@@ -955,6 +992,7 @@ async fn bomb_play_updates_table_narration() {
                 .body(Body::from(
                     json!({
                         "playerId": &pids[0],
+                        "playerKey": lookup_player_key(&pids[0]).unwrap_or_default(),
                         "seq": seq,
                         "cards": ["♠3", "♥3", "♦3", "♣3"]
                     })
@@ -975,6 +1013,102 @@ async fn bomb_play_updates_table_narration() {
 }
 
 #[tokio::test]
+async fn straight_flush_play_is_legal_and_recorded() {
+    let store = TableStore::new();
+    let app = app_with_store(store.clone());
+    let (app, table_id, pids, seq) = create_ready_table_with_store(app).await;
+    let pkey = lookup_player_key(&pids[0]).unwrap_or_default();
+
+    let mut game = TestFixtures::table_game_playing_four_singles_endgame();
+    game.phase = GamePhase::Playing;
+    game.turn_seat = Seat::E;
+    game.leader_seat = Seat::E;
+    let hand = game.hand.as_mut().unwrap();
+    hand.finishing_order.clear();
+    hand.history.clear();
+    hand.trick.top_play = None;
+    hand.trick.last_play_seat = None;
+    hand.trick.consecutive_passes = 0;
+    hand.hands.insert(
+        Seat::E,
+        vec![
+            "♠3".into(),
+            "♠4".into(),
+            "♠5".into(),
+            "♠6".into(),
+            "♠7".into(),
+            "♥9".into(),
+        ],
+    );
+    hand.hands.insert(Seat::S, vec!["♠Q".into(), "♠K".into()]);
+    hand.hands.insert(Seat::W, vec!["♣8".into(), "♦8".into()]);
+    hand.hands.insert(Seat::N, vec!["♥10".into(), "♣10".into()]);
+
+    store
+        .test_set_game_state(
+            &table_id,
+            game,
+            GameConfig {
+                rng_seed: store
+                    .get_snapshot(&table_id)
+                    .await
+                    .unwrap()
+                    .game_config
+                    .rng_seed,
+            },
+        )
+        .await
+        .unwrap();
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/tables/{}/actions/play", table_id))
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "playerId": &pids[0],
+                        "playerKey": pkey,
+                        "seq": seq,
+                        "cards": ["♠3", "♠4", "♠5", "♠6", "♠7"]
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let body = read_utf8(res).await;
+    assert_eq!(status, StatusCode::OK, "unexpected body: {body}");
+
+    let snap = store.get_snapshot(&table_id).await.unwrap();
+    let last = snap
+        .game
+        .as_ref()
+        .unwrap()
+        .hand
+        .as_ref()
+        .unwrap()
+        .history
+        .last()
+        .unwrap();
+    assert_eq!(last.action_type, HistoryActionKind::Play);
+    assert_eq!(last.combination_type.as_deref(), Some("straightFlush"));
+
+    let player_snap = snapshot_player(&app, &table_id, &pids[1]).await;
+    assert!(
+        player_snap["narration"].as_str().is_some_and(|s| {
+            s.contains("同花顺炸") || s.contains("straight flush bomb")
+        }),
+        "expected straight-flush narration, got {:?}",
+        player_snap["narration"]
+    );
+}
+
+#[tokio::test]
 async fn inactive_player_marks_away_and_ends_game_without_scoring() {
     let store = TableStore::new();
     let app = app_with_store(store.clone());
@@ -991,8 +1125,11 @@ async fn inactive_player_marks_away_and_ends_game_without_scoring() {
             Request::builder()
                 .method("GET")
                 .uri(format!(
-                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=50&playerId={}",
-                    table_id, seq, pids[0]
+                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=50&playerId={}&playerKey={}",
+                    table_id,
+                    seq,
+                    pids[0],
+                    lookup_player_key(&pids[0]).unwrap_or_default()
                 ))
                 .body(Body::empty())
                 .unwrap(),
@@ -1035,6 +1172,7 @@ async fn snapshot_and_nextstate_reject_unseated_player_id() {
     let (app, table_id, pids, seq) = create_ready_table_with_store(app).await;
 
     let bogus = "bogus_player_not_at_table";
+    let bogus_key = "bogus_player_key";
 
     let res = app
         .clone()
@@ -1042,17 +1180,17 @@ async fn snapshot_and_nextstate_reject_unseated_player_id() {
             Request::builder()
                 .method("GET")
                 .uri(format!(
-                    "/api/v1/tables/{}/snapshot?playerId={}",
-                    table_id, bogus
+                    "/api/v1/tables/{}/snapshot?playerId={}&playerKey={}",
+                    table_id, bogus, bogus_key
                 ))
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
     let err = read_json(res).await;
-    assert_eq!(err["error"]["code"], "BAD_REQUEST");
+    assert_eq!(err["error"]["code"], "FORBIDDEN");
     assert!(
         err["error"]["message"]
             .as_str()
@@ -1066,17 +1204,17 @@ async fn snapshot_and_nextstate_reject_unseated_player_id() {
             Request::builder()
                 .method("GET")
                 .uri(format!(
-                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=0&playerId={}",
-                    table_id, seq, bogus
+                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=0&playerId={}&playerKey={}",
+                    table_id, seq, bogus, bogus_key
                 ))
                 .body(Body::empty())
                 .unwrap(),
         )
         .await
         .unwrap();
-    assert_eq!(res.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
     let err = read_json(res).await;
-    assert_eq!(err["error"]["code"], "BAD_REQUEST");
+    assert_eq!(err["error"]["code"], "FORBIDDEN");
 
     let snap = snapshot_player(&app, &table_id, &pids[0]).await;
     assert!(snap.get("error").is_none());
@@ -1087,8 +1225,11 @@ async fn snapshot_and_nextstate_reject_unseated_player_id() {
             Request::builder()
                 .method("GET")
                 .uri(format!(
-                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=0&playerId={}",
-                    table_id, seq, pids[0]
+                    "/api/v1/tables/{}/nextstate?sinceSeq={}&timeoutMs=0&playerId={}&playerKey={}",
+                    table_id,
+                    seq,
+                    pids[0],
+                    lookup_player_key(&pids[0]).unwrap_or_default()
                 ))
                 .body(Body::empty())
                 .unwrap(),

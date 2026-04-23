@@ -48,19 +48,19 @@ fn dedupe_names(mut names: Vec<String>) -> Vec<String> {
 pub fn resolve(
     script: &Path,
     timeout: Duration,
-    verbose: bool,
+    verbosity: u8,
     ctx: &JoinNamesContext,
 ) -> Result<Vec<String>, String> {
-    if verbose {
+    if verbosity >= 2 {
         println!(
             "[llm-bot] naming: table={} count={}",
             ctx.table_id, ctx.count
         );
     }
     let prompt = prompt::naming_prompt(&ctx.table_id, ctx.count, ctx.snapshot.as_ref());
-    let stdout = run_script_with_timeout(script, &prompt, timeout, verbose, "naming")?;
+    let stdout = run_script_with_timeout(script, &prompt, timeout, verbosity, "naming")?;
     let parsed = parse_naming_stdout(&stdout);
-    if verbose {
+    if verbosity >= 2 {
         println!("[llm-bot] naming: parsed = {parsed:?}");
     }
     match parsed {
@@ -76,7 +76,7 @@ pub fn resolve(
             }
             let sanitized: Vec<String> = names.iter().map(|s| sanitize_one(s)).collect();
             let out = dedupe_names(sanitized);
-            if verbose {
+            if verbosity >= 2 {
                 println!("[llm-bot] naming: final display names = {out:?}");
             }
             Ok(out)

@@ -99,4 +99,46 @@ mod tests {
         assert!(BeatComparator::can_beat(&low, &high));
         assert!(!BeatComparator::can_beat(&high, &low));
     }
+
+    #[test]
+    fn straight_flush_tier_sits_between_quint_and_sext_bomb() {
+        let quint = Combination {
+            kind: CombinationKind::Bomb(BombKind::SameRank { n: 5 }),
+            cards_len: 5,
+            primary: 10,
+            bomb_tier: 2,
+        };
+        let straight_flush = Combination {
+            kind: CombinationKind::Bomb(BombKind::StraightFlush),
+            cards_len: 5,
+            primary: 13,
+            bomb_tier: 3,
+        };
+        let sext = Combination {
+            kind: CombinationKind::Bomb(BombKind::SameRank { n: 6 }),
+            cards_len: 6,
+            primary: 3,
+            bomb_tier: 4,
+        };
+        assert!(BeatComparator::can_beat(&quint, &straight_flush));
+        assert!(!BeatComparator::can_beat(&sext, &straight_flush));
+    }
+
+    #[test]
+    fn straight_flush_same_tier_compares_primary() {
+        let low = Combination {
+            kind: CombinationKind::Bomb(BombKind::StraightFlush),
+            cards_len: 5,
+            primary: 11,
+            bomb_tier: 3,
+        };
+        let high = Combination {
+            kind: CombinationKind::Bomb(BombKind::StraightFlush),
+            cards_len: 5,
+            primary: 14,
+            bomb_tier: 3,
+        };
+        assert!(BeatComparator::can_beat(&low, &high));
+        assert!(!BeatComparator::can_beat(&high, &low));
+    }
 }

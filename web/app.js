@@ -2088,6 +2088,7 @@ function renderTables() {
       });
     } else if (tableSimpleState === "waiting") {
       actionBtn.textContent = t("quickJoin");
+      actionBtn.classList.add("table-card-quick-join");
       actionBtn.addEventListener("click", (ev) => {
         ev.stopPropagation();
         joinTableFromLobby(tableState.tableId || "", "auto");

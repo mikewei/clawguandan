@@ -16,7 +16,8 @@ use crate::domain::TableState;
 use crate::game::engine::PlayerAction;
 use crate::simulation::run_cli_command;
 
-const NEXTSTATE_TIMEOUT_MS: u64 = 110_000;
+const NEXTSTATE_TIMEOUT_MS: u64 = 10_000;
+const BOT_WAIT4MYTURN_TIMEOUT_MS: u64 = 10_000;
 const MAX_STEPS: u64 = 500_000;
 
 #[derive(Clone, Debug)]
@@ -53,6 +54,7 @@ struct RuntimeShared {
 
 impl RuntimeShared {
     fn fail(&self, msg: String) {
+        eprintln!("[llm-bot][E][runtime] {msg}");
         let mut e = self.err.lock().unwrap();
         if e.is_none() {
             *e = Some(msg);
@@ -369,12 +371,20 @@ pub fn run_bot_subprocess(
         let out = match run_cli_command(&bin_obs, &argv) {
             Ok(o) => o,
             Err(e) => {
+                eprintln!(
+                    "[{plugin_id_obs}][E][cli:error] actor=observer op=nextstate cmd=clawguandan {} err={e}",
+                    argv.join(" ")
+                );
                 let msg = e.to_string();
                 if msg.contains("error sending request") || msg.contains("connection") {
                     std::thread::sleep(Duration::from_millis(200));
                     match run_cli_command(&bin_obs, &argv) {
                         Ok(o) => o,
                         Err(e2) => {
+                            eprintln!(
+                                "[{plugin_id_obs}][E][cli:error] actor=observer op=nextstate(retry) cmd=clawguandan {} err={e2}",
+                                argv.join(" ")
+                            );
                             shared_obs.fail(format!("observer: nextstate: {e2}"));
                             break;
                         }
@@ -387,13 +397,16 @@ pub fn run_bot_subprocess(
         };
         let out_txt = String::from_utf8_lossy(&out.stdout);
         let err_txt = String::from_utf8_lossy(&out.stderr);
+        let no_content = nextstate_stdout_is_no_content(&out.stdout);
         if show_cli_io_obs {
-            log_cli_stdout(&plugin_id_obs, "observer", &out_txt);
+            if !no_content {
+                log_cli_stdout(&plugin_id_obs, "observer", &out_txt);
+            }
             if show_cli_stderr_obs && !err_txt.trim().is_empty() {
                 log_cli_stderr(&plugin_id_obs, "observer", &err_txt);
             }
         }
-        if nextstate_stdout_is_no_content(&out.stdout) {
+        if no_content {
             continue;
         }
         let v = match parse_cli_stdout_json(&out.stdout) {
@@ -486,10 +499,15 @@ pub fn run_bot_subprocess(
     for (i, pid) in pids.iter().cloned().enumerate() {
         let bin_bot = bin.clone();
         let table_id_bot = table_id.clone();
+        let player_name_bot = display_names
+            .get(i)
+            .cloned()
+            .unwrap_or_else(|| format!("bot{i}"));
+        let player_label_bot = format!("{pid}({player_name_bot})");
         let shared_bot = Arc::clone(&shared);
         let controlled_pids_bot = Arc::clone(&controlled_pids);
         let controlled_pids_text_bot = controlled_pids_text.clone();
-        let prefix = format!("bot{i}");
+        let actor_label = player_label_bot.clone();
         let plugin_bot = Arc::clone(&plugin);
         let plugin_id_bot = plugin_bot.plugin_id().to_string();
         let show_summary_bot = opts.show_summary();
@@ -504,7 +522,7 @@ pub fn run_bot_subprocess(
                 }
                 if steps >= MAX_STEPS {
                     shared_bot.fail(format!(
-                        "{prefix}: exceeded max steps ({MAX_STEPS}); possible livelock"
+                        "{actor_label}: exceeded max steps ({MAX_STEPS}); possible livelock"
                     ));
                     break;
                 }
@@ -518,26 +536,47 @@ pub fn run_bot_subprocess(
                     "-p".to_string(),
                     pid.clone(),
                     "--timeout-ms".to_string(),
-                    NEXTSTATE_TIMEOUT_MS.to_string(),
+                    BOT_WAIT4MYTURN_TIMEOUT_MS.to_string(),
                 ];
                 if show_cli_io_bot {
-                    log_cli_call(&plugin_id_bot, &prefix, &argv);
+                    log_cli_call(&plugin_id_bot, &actor_label, &argv);
                 }
                 let out = match run_cli_command(&bin_bot, &argv) {
                     Ok(o) => o,
                     Err(e) => {
                         let msg = e.to_string();
+                        if cli_error_is_wait4myturn_timeout(&msg) {
+                            if shared_bot.stop.load(Ordering::SeqCst) {
+                                break;
+                            }
+                            continue;
+                        }
+                        eprintln!(
+                            "[{plugin_id_bot}][E][cli:error] actor={actor_label} op=wait4myturn cmd=clawguandan {} err={e}",
+                            argv.join(" ")
+                        );
                         if msg.contains("error sending request") || msg.contains("connection") {
                             std::thread::sleep(Duration::from_millis(200));
                             match run_cli_command(&bin_bot, &argv) {
                                 Ok(o) => o,
                                 Err(e2) => {
-                                    shared_bot.fail(format!("{prefix}: wait4myturn: {e2}"));
+                                    let msg2 = e2.to_string();
+                                    if cli_error_is_wait4myturn_timeout(&msg2) {
+                                        if shared_bot.stop.load(Ordering::SeqCst) {
+                                            break;
+                                        }
+                                        continue;
+                                    }
+                                    eprintln!(
+                                        "[{plugin_id_bot}][E][cli:error] actor={actor_label} op=wait4myturn(retry) cmd=clawguandan {} err={e2}",
+                                        argv.join(" ")
+                                    );
+                                    shared_bot.fail(format!("{actor_label}: wait4myturn: {e2}"));
                                     break;
                                 }
                             }
                         } else {
-                            shared_bot.fail(format!("{prefix}: wait4myturn: {e}"));
+                            shared_bot.fail(format!("{actor_label}: wait4myturn: {e}"));
                             break;
                         }
                     }
@@ -545,16 +584,16 @@ pub fn run_bot_subprocess(
                 let out_txt = String::from_utf8_lossy(&out.stdout);
                 let err_txt = String::from_utf8_lossy(&out.stderr);
                 if show_cli_io_bot {
-                    log_cli_stdout(&plugin_id_bot, &prefix, &out_txt);
+                    log_cli_stdout(&plugin_id_bot, &actor_label, &out_txt);
                     if show_cli_stderr_bot && !err_txt.trim().is_empty() {
-                        log_cli_stderr(&plugin_id_bot, &prefix, &err_txt);
+                        log_cli_stderr(&plugin_id_bot, &actor_label, &err_txt);
                     }
                 }
 
                 let state = match parse_cli_stdout_json(&out.stdout) {
                     Ok(j) => j,
                     Err(e) => {
-                        shared_bot.fail(format!("{prefix}: {e}"));
+                        shared_bot.fail(format!("{actor_label}: {e}"));
                         break;
                     }
                 };
@@ -567,14 +606,14 @@ pub fn run_bot_subprocess(
                 let expect = match state.get("expect") {
                     Some(e) => e.clone(),
                     None => {
-                        shared_bot.fail(format!("{prefix}: wait4myturn: missing expect"));
+                        shared_bot.fail(format!("{actor_label}: wait4myturn: missing expect"));
                         break;
                     }
                 };
                 let kind = expect.get("kind").and_then(|x| x.as_str()).unwrap_or("");
                 if let Some(actor) = expect_has_uncontrolled_actor(&expect, &controlled_pids_bot) {
                     shared_bot.fail(format!(
-                        "{prefix}: actor {actor} is not controlled by {}. controlled_bot_ids=[{controlled_pids_text_bot}]",
+                        "{actor_label}: actor {actor} is not controlled by {}. controlled_bot_ids=[{controlled_pids_text_bot}]",
                         plugin_bot.plugin_id()
                     ));
                     break;
@@ -603,7 +642,7 @@ pub fn run_bot_subprocess(
                 let decision = match decision_result {
                     Ok(d) => d,
                     Err(e) => {
-                        shared_bot.fail(format!("{prefix}: plugin decision: {e}"));
+                        shared_bot.fail(format!("{actor_label}: plugin decision: {e}"));
                         break;
                     }
                 };
@@ -611,8 +650,9 @@ pub fn run_bot_subprocess(
                     &bin_bot,
                     &table_id_bot,
                     &pid,
+                    &player_label_bot,
                     &decision,
-                    &prefix,
+                    &actor_label,
                     &plugin_id_bot,
                     show_summary_bot,
                     show_cli_io_bot,
@@ -649,6 +689,7 @@ fn run_decision_action(
     bin: &std::path::Path,
     table_id: &str,
     player_id: &str,
+    player_label: &str,
     decision: &BotDecision,
     prefix: &str,
     plugin_id: &str,
@@ -661,7 +702,7 @@ fn run_decision_action(
             if show_summary {
                 println!(
                     "[{plugin_id}][I][player:ready] player={} table={}",
-                    player_id, table_id
+                    player_label, table_id
                 );
             }
             let argv = vec![
@@ -712,7 +753,7 @@ fn run_decision_action(
             if show_summary {
                 println!(
                     "[{plugin_id}][I][player:action] player={} table={} via=suggest action={}",
-                    player_id,
+                    player_label,
                     table_id,
                     player_action_summary(&action)
                 );
@@ -732,7 +773,7 @@ fn run_decision_action(
             if show_summary {
                 println!(
                     "[{plugin_id}][I][player:action] player={} table={} via=policy action={}",
-                    player_id,
+                    player_label,
                     table_id,
                     player_action_summary(action)
                 );
@@ -795,7 +836,13 @@ fn run_cli_with_capture(
     if show_cli_io {
         log_cli_call(plugin_id, prefix, &argv);
     }
-    let out = run_cli_command(bin, &argv).map_err(|e| format!("{prefix}: {op}: {e}"))?;
+    let out = run_cli_command(bin, &argv).map_err(|e| {
+        eprintln!(
+            "[{plugin_id}][E][cli:error] actor={prefix} op={op} cmd=clawguandan {} err={e}",
+            argv.join(" ")
+        );
+        format!("{prefix}: {op}: {e}")
+    })?;
     if show_cli_io {
         log_cli_stdout(plugin_id, prefix, &String::from_utf8_lossy(&out.stdout));
     }
@@ -845,6 +892,10 @@ fn observer_session_prefix(plugin_id: &str) -> String {
 fn nextstate_stdout_is_no_content(stdout: &[u8]) -> bool {
     let t = String::from_utf8_lossy(stdout).trim().to_string();
     t.is_empty() || t.starts_with("(no new transition within timeout)")
+}
+
+fn cli_error_is_wait4myturn_timeout(msg: &str) -> bool {
+    msg.contains("wait4myturn timeout after")
 }
 
 fn transition_counts_as_hand_done(v: &Value) -> bool {

@@ -19,7 +19,7 @@ impl NamePolicy for LlmNamePolicy {
         naming::resolve(
             &self.params.script,
             self.params.timeout,
-            self.params.verbose,
+            self.params.verbosity,
             ctx,
         )
     }

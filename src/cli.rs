@@ -1,11 +1,14 @@
-use clap::{ArgAction, Parser, Subcommand};
+use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
+use std::io::{Read, Write};
 use std::net::IpAddr;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 #[cfg(test)]
@@ -16,7 +19,7 @@ use std::sync::Arc;
 #[cfg(test)]
 use std::sync::Mutex;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use url::Url;
 
@@ -608,7 +611,7 @@ pub(crate) enum BotCmd {
         #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
         verbosity: u8,
     },
-    /// Run LLM-driven bots: each decision invokes `ask_llm.sh` (stdin prompt, stdout markers).
+    /// Run LLM-driven bots: each decision invokes your script (stdin prompt, stdout markers).
     LlmBot {
         /// Optional existing table ID to join. If omitted, creates a fresh table.
         #[arg(short = 't', long)]
@@ -625,16 +628,25 @@ pub(crate) enum BotCmd {
         /// Increase log verbosity (`-v` summary, `-vv` subprocess stdout, `-vvv` +stderr/raw transition)
         #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
         verbosity: u8,
-        /// Path to user script (e.g. `ask_llm.sh`): read UTF-8 prompt from stdin, write markers to stdout.
-        #[arg(long)]
-        ask_llm: PathBuf,
-        /// Wall-clock timeout per `ask_llm.sh` invocation in milliseconds (default: 120000).
+        /// Path to user script: read UTF-8 prompt from stdin, write markers to stdout.
+        #[arg(long, conflicts_with = "default_script")]
+        script: Option<PathBuf>,
+        /// Use built-in default script under temp_dir()/clawguandan/scripts/.
+        #[arg(long, value_enum, conflicts_with = "script")]
+        default_script: Option<DefaultScriptKind>,
+        /// Wall-clock timeout per script invocation in milliseconds (default: 120000).
         #[arg(long)]
         llm_timeout_ms: Option<u64>,
-        /// Before join, call `ask_llm.sh` once to parse `<<<NAMING:LIST|...>>>` for bot display names.
+        /// Before join, call script once to parse `<<<NAMING:LIST|...>>>` for bot display names.
         #[arg(long)]
         llm_name_bots: bool,
     },
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub(crate) enum DefaultScriptKind {
+    Openclaw,
+    Hermes,
 }
 
 #[derive(Subcommand)]
@@ -768,8 +780,9 @@ pub(crate) enum PlayCmd {
         player_id: String,
         #[arg(short = 'k', long)]
         player_key: Option<String>,
-        #[arg(long, default_value_t = 60000)]
-        timeout_ms: u64,
+        /// Overall maximum wait budget in milliseconds. Omit to wait indefinitely.
+        #[arg(long)]
+        timeout_ms: Option<u64>,
         #[arg(long)]
         seq: Option<u64>,
         /// Print full table state + private (default is a fixed-key summary)
@@ -939,7 +952,8 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 players,
                 hands,
                 verbosity,
-                ask_llm,
+                script,
+                default_script,
                 llm_timeout_ms,
                 llm_name_bots,
             } => simulate_llm_subprocess(
@@ -948,7 +962,8 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 players,
                 hands,
                 verbosity,
-                ask_llm,
+                script,
+                default_script,
                 llm_timeout_ms,
                 llm_name_bots,
             ),
@@ -1931,9 +1946,10 @@ fn play_wait4myturn(
     player_id: String,
     player_key: Option<String>,
     manual_seq: Option<u64>,
-    timeout_ms: u64,
+    timeout_ms: Option<u64>,
     print_mode: MaterializedPrintMode,
 ) -> Result<(), String> {
+    const WAIT4MYTURN_NEXTSTATE_MAX_TIMEOUT_MS: u64 = 60_000;
     if manual_seq.is_some() {
         return Err("play wait4myturn does not support --seq (uses session auto-seq)".into());
     }
@@ -1963,13 +1979,32 @@ fn play_wait4myturn(
         }
     }
 
+    let budget_ms = timeout_ms;
+    let deadline = budget_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     loop {
+        let poll_timeout_ms: u64 = match deadline {
+            Some(dl) => {
+                let now = Instant::now();
+                if now >= dl {
+                    return Err(format!(
+                        "wait4myturn timeout after {}ms",
+                        budget_ms.unwrap_or_default()
+                    ));
+                }
+                let remaining_ms_u128 = dl.saturating_duration_since(now).as_millis();
+                let remaining_ms = u64::try_from(remaining_ms_u128).unwrap_or(u64::MAX);
+                remaining_ms
+                    .min(WAIT4MYTURN_NEXTSTATE_MAX_TIMEOUT_MS)
+                    .max(1)
+            }
+            None => WAIT4MYTURN_NEXTSTATE_MAX_TIMEOUT_MS,
+        };
         let since_seq = read_session_last_applied_seq(&base, &table_id, &player_id)?.unwrap_or(0);
         let mut u = url::Url::parse(&format!("{}/api/v1/tables/{}/nextstate", base, table_id))
             .map_err(|e| e.to_string())?;
         u.query_pairs_mut()
             .append_pair("sinceSeq", &since_seq.to_string())
-            .append_pair("timeoutMs", &timeout_ms.to_string());
+            .append_pair("timeoutMs", &poll_timeout_ms.to_string());
         u.query_pairs_mut().append_pair("playerId", &player_id);
         u.query_pairs_mut().append_pair("playerKey", &pkey);
 
@@ -2556,11 +2591,17 @@ fn simulate_llm_subprocess(
     players: Option<u8>,
     hands: Option<u32>,
     verbosity: u8,
-    ask_llm: PathBuf,
+    script: Option<PathBuf>,
+    default_script: Option<DefaultScriptKind>,
     llm_timeout_ms: Option<u64>,
     llm_name_bots: bool,
 ) -> Result<(), String> {
     let timeout_ms = llm_timeout_ms.unwrap_or(120_000);
+    let resolved = resolve_llm_script(script, default_script)?;
+    println!("[llm-bot] script:init {}", resolved.init_message);
+    if resolved.is_default_script {
+        verify_default_script_marker(&resolved.path, Duration::from_millis(timeout_ms))?;
+    }
     run_bot_subprocess(
         BotRunOptions {
             table,
@@ -2570,12 +2611,173 @@ fn simulate_llm_subprocess(
             verbosity,
         },
         Arc::new(LlmBotPlugin::new(LlmBotParams {
-            script: ask_llm,
+            script: resolved.path,
             timeout: Duration::from_millis(timeout_ms),
             name_bots: llm_name_bots,
-            verbose: verbosity >= 2,
+            verbosity,
         })),
     )
+}
+
+struct ResolvedLlmScript {
+    path: PathBuf,
+    is_default_script: bool,
+    init_message: String,
+}
+
+fn resolve_llm_script(
+    script: Option<PathBuf>,
+    default_script: Option<DefaultScriptKind>,
+) -> Result<ResolvedLlmScript, String> {
+    match (script, default_script) {
+        (Some(path), None) => Ok(ResolvedLlmScript {
+            init_message: format!("load custom script={}", path.display()),
+            path,
+            is_default_script: false,
+        }),
+        (None, Some(kind)) => {
+            let (path, created) = ensure_default_script(kind)?;
+            let action = if created { "create" } else { "load" };
+            Ok(ResolvedLlmScript {
+                init_message: format!("{action} default script={}", path.display()),
+                path,
+                is_default_script: true,
+            })
+        }
+        (None, None) => Err("must provide either --script or --default-script".into()),
+        (Some(_), Some(_)) => Err("--script and --default-script are mutually exclusive".into()),
+    }
+}
+
+fn default_script_path(kind: DefaultScriptKind) -> PathBuf {
+    let file = match kind {
+        DefaultScriptKind::Openclaw => "ask_openclaw.sh",
+        DefaultScriptKind::Hermes => "ask_hermes.sh",
+    };
+    session_state_root().join("scripts").join(file)
+}
+
+fn default_script_body(kind: DefaultScriptKind) -> &'static str {
+    match kind {
+        DefaultScriptKind::Openclaw => {
+            r#"#!/bin/bash
+
+PROMPT=$(cat)
+openclaw agent --message "$PROMPT" --local --agent main
+"#
+        }
+        DefaultScriptKind::Hermes => {
+            r#"#!/bin/bash
+
+PROMPT=$(cat)
+hermes chat -q "$PROMPT" --quiet
+"#
+        }
+    }
+}
+
+fn ensure_default_script(kind: DefaultScriptKind) -> Result<(PathBuf, bool), String> {
+    let path = default_script_path(kind);
+    if path.exists() {
+        ensure_executable(&path)?;
+        return Ok((path, false));
+    }
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("default script has no parent: {}", path.display()))?;
+    fs::create_dir_all(parent)
+        .map_err(|e| format!("create default script dir {}: {e}", parent.display()))?;
+    fs::write(&path, default_script_body(kind))
+        .map_err(|e| format!("write default script {}: {e}", path.display()))?;
+    ensure_executable(&path)?;
+    Ok((path, true))
+}
+
+fn ensure_executable(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(path)
+            .map_err(|e| format!("stat script {}: {e}", path.display()))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(path, perms)
+            .map_err(|e| format!("chmod +x {}: {e}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn verify_default_script_marker(script: &Path, timeout: Duration) -> Result<(), String> {
+    const EXPECTED_MARKER: &str = "<<<DECISION:PASS>>>";
+    let prompt = format!(
+        "Smoke test. Reply exactly with this one-line marker and nothing else:\n{EXPECTED_MARKER}\n"
+    );
+    let out = match run_script_for_check(script, &prompt, timeout) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("[llm-bot] default script self-check error: {e}");
+            return Err(format!(
+                "The default script is not working, please fix it and rerun or use another script via --script. The default script file is at {}",
+                script.display()
+            ));
+        }
+    };
+    if out.contains(EXPECTED_MARKER) {
+        return Ok(());
+    }
+    eprintln!(
+        "[llm-bot] default script self-check error: expected marker {EXPECTED_MARKER}, got stdout={:?}",
+        out.trim()
+    );
+    Err(format!(
+        "The default script is not working, please fix it and rerun or use another script via --script. The default script file is at {}",
+        script.display()
+    ))
+}
+
+fn run_script_for_check(script: &Path, prompt: &str, timeout: Duration) -> Result<String, String> {
+    let mut child = Command::new(script)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("spawn {:?}: {e}", script))?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(prompt.as_bytes())
+            .map_err(|e| format!("stdin: {e}"))?;
+    }
+
+    let deadline = std::time::Instant::now() + timeout;
+    let status = loop {
+        if std::time::Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("timeout".into());
+        }
+        match child.try_wait().map_err(|e| e.to_string())? {
+            None => std::thread::sleep(Duration::from_millis(25)),
+            Some(s) => break s,
+        }
+    };
+
+    let mut stdout_buf = Vec::new();
+    if let Some(mut out) = child.stdout.take() {
+        let _ = out.read_to_end(&mut stdout_buf);
+    }
+    let mut stderr_buf = Vec::new();
+    if let Some(mut err) = child.stderr.take() {
+        let _ = err.read_to_end(&mut stderr_buf);
+    }
+    let stderr = String::from_utf8_lossy(&stderr_buf).into_owned();
+    if !status.success() {
+        return Err(format!(
+            "script exit {:?}: stderr={}",
+            status.code(),
+            stderr.trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&stdout_buf).into_owned())
 }
 
 #[cfg(test)]

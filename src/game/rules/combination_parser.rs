@@ -259,7 +259,7 @@ fn is_straight_flush(cards: &[Card]) -> Result<bool, String> {
     if suit == Suit::Joker || cards.iter().any(|c| c.suit != suit) {
         return Ok(false);
     }
-    is_straight(cards)
+    Ok(straight_highest_natural(cards).is_ok())
 }
 
 fn is_full_house(cards: &[Card]) -> Result<bool, String> {
@@ -436,6 +436,92 @@ mod tests {
         let c = CombinationParser::parse(&cards, Some(&[]), ctx).unwrap();
         assert_eq!(c.kind, CombinationKind::Ordinary(OrdinaryKind::Straight));
         assert_eq!(c.primary, 5);
+    }
+
+    #[test]
+    fn straight_flush_parses_and_sets_tier() {
+        let ctx = RuleContext {
+            hand_level: HandLevel::Two,
+        };
+        let cards = vec![
+            "♠9".to_string(),
+            "♠10".to_string(),
+            "♠J".to_string(),
+            "♠Q".to_string(),
+            "♠K".to_string(),
+        ];
+        let c = CombinationParser::parse(&cards, None, ctx).unwrap();
+        assert_eq!(c.kind, CombinationKind::Bomb(BombKind::StraightFlush));
+        assert_eq!(c.primary, 13);
+        assert_eq!(c.bomb_tier, 3);
+    }
+
+    #[test]
+    fn straight_flush_accepts_a2345() {
+        let ctx = RuleContext {
+            hand_level: HandLevel::Two,
+        };
+        let cards = vec![
+            "♠A".to_string(),
+            "♠2".to_string(),
+            "♠3".to_string(),
+            "♠4".to_string(),
+            "♠5".to_string(),
+        ];
+        let c = CombinationParser::parse(&cards, None, ctx).unwrap();
+        assert_eq!(c.kind, CombinationKind::Bomb(BombKind::StraightFlush));
+        assert_eq!(c.primary, 5);
+        assert_eq!(c.bomb_tier, 3);
+    }
+
+    #[test]
+    fn straight_flush_rejects_non_consecutive_same_suit() {
+        let ctx = RuleContext {
+            hand_level: HandLevel::Two,
+        };
+        let cards = vec![
+            "♠9".to_string(),
+            "♠10".to_string(),
+            "♠J".to_string(),
+            "♠Q".to_string(),
+            "♠A".to_string(),
+        ];
+        let err = CombinationParser::parse(&cards, None, ctx).unwrap_err();
+        assert!(err.contains("invalid 5-card ordinary combination"));
+    }
+
+    #[test]
+    fn straight_flush_rejects_joker_member() {
+        let ctx = RuleContext {
+            hand_level: HandLevel::Two,
+        };
+        let cards = vec![
+            "🃏R".to_string(),
+            "♠10".to_string(),
+            "♠J".to_string(),
+            "♠Q".to_string(),
+            "♠K".to_string(),
+        ];
+        let err = CombinationParser::parse(&cards, None, ctx).unwrap_err();
+        assert!(err.contains("invalid 5-card ordinary combination"));
+    }
+
+    #[test]
+    fn wild_target_can_form_straight_flush() {
+        let ctx = RuleContext {
+            hand_level: HandLevel::Two,
+        };
+        let cards = vec![
+            "♥2".to_string(),
+            "♠10".to_string(),
+            "♠J".to_string(),
+            "♠Q".to_string(),
+            "♠K".to_string(),
+        ];
+        let c = CombinationParser::parse(&cards, Some(&["♠A".to_string()]), ctx).unwrap();
+        assert_eq!(c.kind, CombinationKind::Bomb(BombKind::StraightFlush));
+        assert_eq!(c.primary, 14);
+        assert_eq!(c.bomb_tier, 3);
     }
 
     #[test]

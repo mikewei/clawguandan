@@ -562,6 +562,19 @@ button:disabled {
   flex-shrink: 0;
 }
 
+.table-card-actions .table-card-quick-join {
+  background: linear-gradient(180deg, #4ee7aa, #34cc92);
+  border-color: rgba(78, 231, 170, 0.9);
+  color: #083324;
+  font-weight: 600;
+}
+
+.table-card-actions .table-card-quick-join:hover:enabled {
+  background: linear-gradient(180deg, #64efb7, #3cda9c);
+  border-color: rgba(96, 240, 183, 0.95);
+  box-shadow: 0 0 0 2px rgba(96, 240, 183, 0.22);
+}
+
 .table-card-create {
   min-height: 182px;
   border-style: dashed;

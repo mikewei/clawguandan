@@ -15,7 +15,7 @@ pub struct LlmScriptPolicy {
 
 impl LlmScriptPolicy {
     fn decide_scripted(&self, ctx: &BotTurnContext) -> Result<BotDecision, String> {
-        if self.params.verbose {
+        if self.params.verbosity >= 2 {
             println!(
                 "[llm-bot] decide: table={} player={} expect_kind={}",
                 ctx.table_id, ctx.player_id, ctx.expect_kind
@@ -27,7 +27,7 @@ impl LlmScriptPolicy {
             &self.params.script,
             &prompt,
             self.params.timeout,
-            self.params.verbose,
+            self.params.verbosity,
             "decision",
         ) {
             Ok(s) => s,
@@ -38,15 +38,15 @@ impl LlmScriptPolicy {
         };
 
         let parsed = parse::parse_decision_stdout(&stdout);
-        if self.params.verbose {
+        if self.params.verbosity >= 2 {
             println!("[llm-bot] decide: parsed = {parsed:?}");
         }
         let mut decision = parsed_decision_to_bot_decision(parsed, &ctx.expect_kind);
-        if self.params.verbose {
+        if self.params.verbosity >= 2 {
             println!("[llm-bot] decide: after parsed + DEFAULT/malformed mapping = {decision:?}");
         }
         decision = parse::validate_decision_against_state(decision, &ctx.state);
-        if self.params.verbose {
+        if self.params.verbosity >= 2 {
             println!("[llm-bot] decide: after validate_decision_against_state = {decision:?}");
         }
         Ok(decision)

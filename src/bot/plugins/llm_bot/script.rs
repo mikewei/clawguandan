@@ -1,4 +1,4 @@
-//! Run `ask_llm.sh`: write stdin (UTF-8 prompt), read stdout with wall-clock timeout.
+//! Run llm-bot script: write stdin (UTF-8 prompt), read stdout with wall-clock timeout.
 
 use std::io::{Read, Write};
 use std::path::Path;
@@ -7,30 +7,54 @@ use std::time::{Duration, Instant};
 
 const VERBOSE_PROMPT_MAX: usize = 48_000;
 
+fn llm_log_prefix(op_label: &str) -> String {
+    format!("[llm-bot][D][llm:{op_label}]")
+}
+
+fn last_marker(stdout: &str) -> Option<String> {
+    let mut cursor = 0usize;
+    let mut out: Option<String> = None;
+    while let Some(rel_start) = stdout[cursor..].find("<<<") {
+        let start = cursor + rel_start;
+        let body_start = start + 3;
+        let Some(rel_end) = stdout[body_start..].find(">>>") else {
+            break;
+        };
+        let end = body_start + rel_end + 3;
+        out = Some(stdout[start..end].trim().to_string());
+        cursor = end;
+    }
+    out
+}
+
 /// Run `script` with `prompt` on stdin; return combined stdout (lossy UTF-8) or error.
 ///
-/// When `verbose`, prints script path, prompt (possibly truncated), stdout, stderr, and elapsed time.
+/// At `-v`, prints key invocation lifecycle logs.
+/// At `-vv` and above, also prints prompt/stdout/stderr details.
 pub fn run_script_with_timeout(
     script: &Path,
     prompt: &str,
     timeout: Duration,
-    verbose: bool,
+    verbosity: u8,
     op_label: &str,
 ) -> Result<String, String> {
     let t0 = Instant::now();
-    if verbose {
+    let log_prefix = llm_log_prefix(op_label);
+    if verbosity >= 1 {
         println!(
-            "\n### [llm-bot:{op_label}] ask_llm script={:?} prompt_bytes={} timeout_ms={}",
+            "{log_prefix} script={:?} prompt_bytes={} timeout_ms={} phase=start",
             script,
             prompt.len(),
             timeout.as_millis()
         );
+    }
+    if verbosity >= 2 {
         if prompt.len() <= VERBOSE_PROMPT_MAX {
-            println!("<< [llm-bot:{op_label}] prompt stdin (full):\n{prompt}");
+            println!("{log_prefix} prompt_stdin_full:\n{prompt}");
         } else {
             let head: String = prompt.chars().take(VERBOSE_PROMPT_MAX).collect();
             println!(
-                "<< [llm-bot:{op_label}] prompt stdin (first {VERBOSE_PROMPT_MAX} chars):\n{head}\n<< ... truncated, total {} bytes",
+                "{log_prefix} prompt_stdin_first_chars({VERBOSE_PROMPT_MAX}):\n{head}\n{log_prefix} prompt_stdin_truncated total_bytes={}",
                 prompt.len()
             );
         }
@@ -55,7 +79,7 @@ pub fn run_script_with_timeout(
             let _ = child.kill();
             let _ = child.wait();
             return Err(format!(
-                "ask_llm timeout after {}ms",
+                "script timeout after {}ms",
                 timeout.as_millis()
             ));
         }
@@ -77,31 +101,42 @@ pub fn run_script_with_timeout(
     let stdout = String::from_utf8_lossy(&stdout_buf).into_owned();
     let stderr = String::from_utf8_lossy(&stderr_buf);
     let elapsed_ms = t0.elapsed().as_millis();
-    if verbose {
+    let marker = last_marker(&stdout).unwrap_or_else(|| "(no-marker)".to_string());
+    if verbosity >= 1 {
         println!(
-            "<< [llm-bot:{op_label}] stdout ({} bytes, {}ms):\n{}",
+            "{log_prefix} exit={:?} elapsed_ms={} stdout_bytes={} stderr_bytes={} marker={}",
+            status.code(),
+            elapsed_ms,
+            stdout.len(),
+            stderr.len(),
+            marker
+        );
+    }
+    if verbosity >= 2 {
+        println!(
+            "{log_prefix} stdout bytes={} elapsed_ms={}:\n{}",
             stdout.len(),
             elapsed_ms,
             stdout
         );
         if !stderr.trim().is_empty() {
             println!(
-                "<< [llm-bot:{op_label}] stderr:\n{}",
+                "{log_prefix} stderr:\n{}",
                 stderr.trim_end()
             );
         } else {
-            println!("<< [llm-bot:{op_label}] stderr: (empty)");
+            println!("{log_prefix} stderr: (empty)");
         }
     }
     if !status.success() {
         return Err(format!(
-            "ask_llm exit {:?}: stderr={}",
+            "script exit {:?}: stderr={}",
             status.code(),
             stderr.trim()
         ));
     }
-    if !verbose && !stderr.trim().is_empty() {
-        eprintln!("[llm-bot] ask_llm stderr: {}", stderr.trim());
+    if verbosity == 0 && !stderr.trim().is_empty() {
+        eprintln!("[llm-bot] script stderr: {}", stderr.trim());
     }
     Ok(stdout)
 }

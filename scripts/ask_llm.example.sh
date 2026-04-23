@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Example `ask_llm.sh` for `clawguandan bot llm-bot --ask-llm ...`.
+# Example script for `clawguandan bot llm-bot --script ...`.
 #
 # Contract:
 # - Read the full UTF-8 prompt from stdin (free text from llm-bot).

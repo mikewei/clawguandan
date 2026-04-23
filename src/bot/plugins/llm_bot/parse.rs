@@ -1,4 +1,4 @@
-//! Parse `ask_llm.sh` stdout: `<<<DECISION:...>>>`, `<<<NAMING:LIST|...>>>`, `<<<DEFAULT>>>`.
+//! Parse llm-bot script stdout: `<<<DECISION:...>>>`, `<<<NAMING:LIST|...>>>`, `<<<DEFAULT>>>`.
 
 use regex::Regex;
 use serde_json::{Value, json};
@@ -98,7 +98,7 @@ fn last_span_for_naming(stdout: &str) -> Option<SpanKind> {
     spans.pop().map(|s| s.kind)
 }
 
-/// Parse stdout from a **decision** `ask_llm` invocation (ignores `<<<NAMING:...>>>`).
+/// Parse stdout from a **decision** script invocation (ignores `<<<NAMING:...>>>`).
 pub fn parse_decision_stdout(stdout: &str) -> ParsedStdoutDecision {
     match last_span(stdout, false) {
         None => ParsedStdoutDecision::Malformed("no DECISION or DEFAULT token".into()),
@@ -157,7 +157,7 @@ fn parse_decision_body(kind_raw: &str, payload: &str) -> ParsedStdoutDecision {
     }
 }
 
-/// Parse stdout from a **naming** `ask_llm` invocation (only `DEFAULT` or `NAMING:LIST`).
+/// Parse stdout from a **naming** script invocation (only `DEFAULT` or `NAMING:LIST`).
 pub fn parse_naming_stdout(stdout: &str) -> ParsedStdoutNaming {
     match last_span_for_naming(stdout) {
         None => ParsedStdoutNaming::Malformed("no NAMING or DEFAULT token".into()),

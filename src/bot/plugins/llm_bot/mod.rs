@@ -1,4 +1,4 @@
-//! `llm-bot` plugin: user `ask_llm.sh` (stdin prompt, stdout markers).
+//! `llm-bot` plugin: user script (stdin prompt, stdout markers).
 
 mod name_policy;
 mod naming;
@@ -22,8 +22,8 @@ pub struct LlmBotParams {
     pub script: std::path::PathBuf,
     pub timeout: Duration,
     pub name_bots: bool,
-    /// When true (e.g. `clawguandan bot llm-bot -vv`), log each `ask_llm.sh` invocation and decisions.
-    pub verbose: bool,
+    /// CLI verbosity count (`-v`, `-vv`, ...).
+    pub verbosity: u8,
 }
 
 #[derive(Clone, Debug)]
