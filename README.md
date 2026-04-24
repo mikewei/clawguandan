@@ -5,7 +5,7 @@
 <h1 align="center">clawguandan</h1>
 
 <p align="center">
-  <strong>AI Native Guandan Card Game</strong>
+  <strong>An AI Native Guandan Card Game</strong>
 </p>
 
 <p align="center">
