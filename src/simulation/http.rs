@@ -30,7 +30,9 @@ impl std::fmt::Display for HttpSimError {
             HttpSimError::Store(e) => write!(f, "{e}"),
             HttpSimError::Movegen(s) => write!(f, "{s}"),
             HttpSimError::NoActor => write!(f, "no player_id for actor seat"),
-            HttpSimError::MissingPlayerKey(pid) => write!(f, "missing player_key for player_id {pid}"),
+            HttpSimError::MissingPlayerKey(pid) => {
+                write!(f, "missing player_key for player_id {pid}")
+            }
             HttpSimError::MaxPlies => write!(f, "max_plies exceeded"),
             HttpSimError::Router(s) => write!(f, "{s}"),
         }

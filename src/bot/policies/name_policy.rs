@@ -15,8 +15,7 @@ impl NamePolicy for DefaultNamePolicy {
 
 pub fn default_name() -> Arc<dyn NamePolicy> {
     static CELL: OnceLock<Arc<DefaultNamePolicy>> = OnceLock::new();
-    CELL.get_or_init(|| Arc::new(DefaultNamePolicy))
-        .clone() as Arc<dyn NamePolicy>
+    CELL.get_or_init(|| Arc::new(DefaultNamePolicy)).clone() as Arc<dyn NamePolicy>
 }
 
 pub fn default_display_names_for_plugin(plugin_id: &str, count: usize) -> Vec<String> {

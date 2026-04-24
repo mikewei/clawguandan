@@ -8,7 +8,10 @@ use super::traits::ReadyPolicy;
 pub struct AlwaysReadyPolicy;
 
 impl ReadyPolicy for AlwaysReadyPolicy {
-    fn decide_ready(&self, _ctx: &crate::bot::plugin::BotTurnContext) -> Result<BotDecision, String> {
+    fn decide_ready(
+        &self,
+        _ctx: &crate::bot::plugin::BotTurnContext,
+    ) -> Result<BotDecision, String> {
         Ok(BotDecision::Ready)
     }
 }

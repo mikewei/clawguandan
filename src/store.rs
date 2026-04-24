@@ -282,10 +282,8 @@ impl TableStore {
             inner.state.game = Some(gs);
             inner.state.sync_phase_from_game();
             inner.state.waiting_next_hand_ready = false;
-            inner.state.narration = format_hand_open(
-                inner.state.current_declarer,
-                first_hand_level.as_api_str(),
-            );
+            inner.state.narration =
+                format_hand_open(inner.state.current_declarer, first_hand_level.as_api_str());
         } else if will_start_next_hand {
             let seq = inner.state.seq;
             let declarer = inner.state.current_declarer;
@@ -679,8 +677,9 @@ impl TableStore {
         timeout: Option<Duration>,
     ) -> Result<Option<NextStateBody>, AppError> {
         if let Some(pid) = player_id {
-            let key = player_key
-                .ok_or_else(|| AppError::BadRequest("playerKey is required with playerId".into()))?;
+            let key = player_key.ok_or_else(|| {
+                AppError::BadRequest("playerKey is required with playerId".into())
+            })?;
             self.verify_player_identity(table_id, pid, key).await?;
             self.touch_player_activity(table_id, pid).await?;
         }
@@ -714,7 +713,11 @@ impl TableStore {
         Ok(Some(body))
     }
 
-    pub async fn touch_player_activity(&self, table_id: &str, player_id: &str) -> Result<(), AppError> {
+    pub async fn touch_player_activity(
+        &self,
+        table_id: &str,
+        player_id: &str,
+    ) -> Result<(), AppError> {
         let arc = {
             let g = self.tables.lock().await;
             g.get(table_id)

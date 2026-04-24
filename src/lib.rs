@@ -2,10 +2,10 @@
 
 pub mod api;
 pub mod bot;
-pub mod lan_addrs;
 pub mod domain;
 pub mod error;
 pub mod game;
+pub mod lan_addrs;
 pub mod prompt;
 pub mod simulation;
 pub mod store;

@@ -14,7 +14,10 @@ pub struct ScoreTrace {
     pub reasons: Vec<String>,
 }
 
-pub fn choose_play_candidate(params: &RuleBotParams, f: &RuleFeatures) -> (PlayCandidate, ScoreTrace) {
+pub fn choose_play_candidate(
+    params: &RuleBotParams,
+    f: &RuleFeatures,
+) -> (PlayCandidate, ScoreTrace) {
     let mut trace = ScoreTrace::default();
     let partner_leading = is_partner_leading(f);
 

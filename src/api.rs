@@ -1,8 +1,8 @@
 use crate::domain::{Phase, PlayerType, PrivateView, TableState, TableStatus};
-use crate::lan_addrs::lan_http_base_urls;
 use crate::error::AppError;
 use crate::game::rules::scoring::Level;
 use crate::game::types::GamePhase;
+use crate::lan_addrs::lan_http_base_urls;
 use crate::store::{SeatOrAuto, TableStore};
 use crate::strategy::{current_actor_seat, suggest_next_action};
 use axum::body::Body;
@@ -420,7 +420,10 @@ async fn suggest(
         .store
         .verify_player_identity(&table_id, &q.player_id, &q.player_key)
         .await?;
-    state.store.touch_player_activity(&table_id, &q.player_id).await?;
+    state
+        .store
+        .touch_player_activity(&table_id, &q.player_id)
+        .await?;
     let snap = state.store.get_snapshot(&table_id).await?;
     if q.seq != snap.seq {
         return Err(AppError::Conflict {

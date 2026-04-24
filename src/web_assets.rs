@@ -51,12 +51,8 @@ pub fn rules_markdown(lang: Option<&str>) -> Result<String, String> {
     let Some(asset) = WebAssets::get(path) else {
         return Err(format!("missing embedded rules: {path}"));
     };
-    String::from_utf8(asset.data.into_owned()).map_err(|e| {
-        format!(
-            "rules markdown is not utf-8: {}",
-            e.utf8_error()
-        )
-    })
+    String::from_utf8(asset.data.into_owned())
+        .map_err(|e| format!("rules markdown is not utf-8: {}", e.utf8_error()))
 }
 
 pub async fn serve_embedded(uri: Uri) -> Response {

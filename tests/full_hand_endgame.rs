@@ -21,7 +21,13 @@ async fn read_json(res: axum::response::Response) -> Value {
 
 async fn create_ready_table(
     app: axum::Router,
-) -> (axum::Router, String, Vec<String>, HashMap<String, String>, u64) {
+) -> (
+    axum::Router,
+    String,
+    Vec<String>,
+    HashMap<String, String>,
+    u64,
+) {
     let res = app
         .clone()
         .oneshot(

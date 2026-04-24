@@ -21,11 +21,7 @@ fn sanitize_one(s: &str) -> String {
         out.push(ch);
     }
     let out = out.trim().to_string();
-    if out.is_empty() {
-        "bot".into()
-    } else {
-        out
-    }
+    if out.is_empty() { "bot".into() } else { out }
 }
 
 fn dedupe_names(mut names: Vec<String>) -> Vec<String> {
@@ -68,11 +64,7 @@ pub fn resolve(
         ParsedStdoutNaming::Malformed(e) => Err(e),
         ParsedStdoutNaming::Names(names) => {
             if names.len() != ctx.count {
-                return Err(format!(
-                    "expected {} names, got {}",
-                    ctx.count,
-                    names.len()
-                ));
+                return Err(format!("expected {} names, got {}", ctx.count, names.len()));
             }
             let sanitized: Vec<String> = names.iter().map(|s| sanitize_one(s)).collect();
             let out = dedupe_names(sanitized);

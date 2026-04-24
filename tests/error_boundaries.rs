@@ -17,7 +17,13 @@ async fn read_json(res: axum::response::Response) -> serde_json::Value {
 
 async fn create_ready_table(
     app: axum::Router,
-) -> (axum::Router, String, Vec<String>, HashMap<String, String>, u64) {
+) -> (
+    axum::Router,
+    String,
+    Vec<String>,
+    HashMap<String, String>,
+    u64,
+) {
     let res = app
         .clone()
         .oneshot(
@@ -98,12 +104,12 @@ async fn unprocessable_includes_code_and_current_seq() {
                 .uri(format!("/api/v1/tables/{}/actions/pass", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                        json!({
-                            "playerId": &pids[1],
-                            "playerKey": keys.get(&pids[1]).unwrap(),
-                            "seq": seq
-                        })
-                        .to_string(),
+                    json!({
+                        "playerId": &pids[1],
+                        "playerKey": keys.get(&pids[1]).unwrap(),
+                        "seq": seq
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -157,12 +163,12 @@ async fn conflict_stale_seq_shape() {
                 .uri(format!("/api/v1/tables/{}/actions/pass", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                        json!({
-                            "playerId": &pids[0],
-                            "playerKey": keys.get(&pids[0]).unwrap(),
-                            "seq": seq - 1
-                        })
-                        .to_string(),
+                    json!({
+                        "playerId": &pids[0],
+                        "playerKey": keys.get(&pids[0]).unwrap(),
+                        "seq": seq - 1
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )
@@ -186,12 +192,12 @@ async fn forbidden_non_seated_shape() {
                 .uri(format!("/api/v1/tables/{}/actions/pass", table_id))
                 .header("content-type", "application/json")
                 .body(Body::from(
-                        json!({
-                            "playerId": "p_not_here",
-                            "playerKey": "wrong-key",
-                            "seq": seq
-                        })
-                        .to_string(),
+                    json!({
+                        "playerId": "p_not_here",
+                        "playerKey": "wrong-key",
+                        "seq": seq
+                    })
+                    .to_string(),
                 ))
                 .unwrap(),
         )

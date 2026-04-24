@@ -3,8 +3,8 @@ use std::sync::Arc;
 use crate::bot::plugin::JoinNamesContext;
 use crate::bot::policies::NamePolicy;
 
-use super::naming;
 use super::LlmBotParams;
+use super::naming;
 
 #[derive(Debug)]
 pub struct LlmNamePolicy {

@@ -92,8 +92,7 @@ impl RuntimeShared {
     }
 
     fn on_transition_maybe_terminal(&self, v: &Value) -> bool {
-        let terminal_by_type =
-            v.get("type").and_then(|x| x.as_str()) == Some("GAME_COMPLETED");
+        let terminal_by_type = v.get("type").and_then(|x| x.as_str()) == Some("GAME_COMPLETED");
         let terminal_by_delta = v
             .get("delta")
             .and_then(|d| d.get("ops"))
@@ -113,14 +112,13 @@ impl RuntimeShared {
     }
 }
 
-pub fn run_bot_subprocess(
-    opts: BotRunOptions,
-    plugin: Arc<dyn BotPlugin>,
-) -> Result<(), String> {
+pub fn run_bot_subprocess(opts: BotRunOptions, plugin: Arc<dyn BotPlugin>) -> Result<(), String> {
     if opts.hands == Some(0) {
         return Err("--hands must be >= 1 when provided".into());
     }
-    if let Some(n) = opts.players && n > 4 {
+    if let Some(n) = opts.players
+        && n > 4
+    {
         return Err("--players must be <= 4".into());
     }
 
@@ -235,10 +233,7 @@ pub fn run_bot_subprocess(
 
     let observer_name = {
         let s = Uuid::new_v4().to_string();
-        let frag = s
-            .split('-')
-            .next()
-            .expect("uuid v4 string is hyphenated");
+        let frag = s.split('-').next().expect("uuid v4 string is hyphenated");
         format!("{}{}", observer_session_prefix(&plugin_id), frag)
     };
 
@@ -248,11 +243,10 @@ pub fn run_bot_subprocess(
         count: target_join,
         snapshot: Some(snapshot.clone()),
     };
-    let display_names: Vec<String> =
-        match plugin.name_policy().join_display_names(&join_ctx) {
-            Ok(v) if v.len() == target_join => v,
-            _ => default_display_names_for_plugin(&plugin_id, target_join),
-        };
+    let display_names: Vec<String> = match plugin.name_policy().join_display_names(&join_ctx) {
+        Ok(v) if v.len() == target_join => v,
+        _ => default_display_names_for_plugin(&plugin_id, target_join),
+    };
 
     let join_model = plugin.join_player_model();
     let mut pids: Vec<String> = Vec::new();
@@ -700,7 +694,8 @@ pub fn run_bot_subprocess(
     }
 
     for h in handles {
-        h.join().map_err(|_| format!("{bot_label}: thread panicked"))?;
+        h.join()
+            .map_err(|_| format!("{bot_label}: thread panicked"))?;
     }
     if let Some(e) = shared.err.lock().unwrap().take() {
         return Err(e);
@@ -798,16 +793,15 @@ fn run_decision_action(
                 "-p".to_string(),
                 player_id.to_string(),
             ];
-            let sug_out =
-                run_cli_with_capture(
-                    bin,
-                    sargv,
-                    prefix,
-                    plugin_id,
-                    show_cli_io,
-                    show_cli_stderr,
-                    "suggest",
-                )?;
+            let sug_out = run_cli_with_capture(
+                bin,
+                sargv,
+                prefix,
+                plugin_id,
+                show_cli_io,
+                show_cli_stderr,
+                "suggest",
+            )?;
             let sug = parse_cli_stdout_json(&sug_out.stdout)?;
             let action_type = sug
                 .get("actionType")
@@ -856,7 +850,6 @@ fn run_decision_action(
             )
         }
     }
-
 }
 
 fn player_action_summary(action: &PlayerAction) -> String {
@@ -869,7 +862,9 @@ fn player_action_summary(action: &PlayerAction) -> String {
             wild_targets,
         } => {
             let mut base = format!("play:{}", cards.join(","));
-            if let Some(wt) = wild_targets && !wt.is_empty() {
+            if let Some(wt) = wild_targets
+                && !wt.is_empty()
+            {
                 base.push_str(&format!(" wild={}", wt.join(",")));
             }
             base
@@ -886,8 +881,16 @@ fn run_cli_with_log(
     show_cli_stderr: bool,
     op: &str,
 ) -> Result<(), String> {
-    run_cli_with_capture(bin, argv, prefix, plugin_id, show_cli_io, show_cli_stderr, op)
-        .map(|_| ())
+    run_cli_with_capture(
+        bin,
+        argv,
+        prefix,
+        plugin_id,
+        show_cli_io,
+        show_cli_stderr,
+        op,
+    )
+    .map(|_| ())
 }
 
 fn run_cli_with_capture(
@@ -1088,7 +1091,9 @@ fn player_action_to_cli_argv_auto(
                 player_id.into(),
                 csv,
             ];
-            if let Some(wt) = wild_targets && !wt.is_empty() {
+            if let Some(wt) = wild_targets
+                && !wt.is_empty()
+            {
                 v.push("--wild-targets".into());
                 v.push(wt.join(","));
             }
@@ -1096,4 +1101,3 @@ fn player_action_to_cli_argv_auto(
         }
     }
 }
-

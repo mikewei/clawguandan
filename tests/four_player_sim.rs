@@ -86,6 +86,59 @@ fn cli_binary_help_smoke() {
 }
 
 #[test]
+fn cli_show_help_lists_version_subcommand() {
+    let bin = std::path::Path::new(env!("CARGO_BIN_EXE_clawguandan"));
+    let out = run_cli_command(bin, &["show", "--help"]).expect("show --help");
+    let help = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        help.contains("version"),
+        "expected `show --help` to include `version`, got:\n{}",
+        help
+    );
+}
+
+#[test]
+fn cli_show_version_prints_layered_version_info() {
+    let bin = std::path::Path::new(env!("CARGO_BIN_EXE_clawguandan"));
+    let out = run_cli_command(bin, &["show", "version"]).expect("show version");
+    let got = String::from_utf8_lossy(&out.stdout);
+    assert!(got.contains(&format!("name: {}", env!("CARGO_PKG_NAME"))));
+    assert!(got.contains(&format!("version: {}", env!("CARGO_PKG_VERSION"))));
+    assert!(got.contains(&format!(
+        "same_as_--version: {} {}",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION")
+    )));
+}
+
+#[test]
+fn cli_show_version_json_outputs_structured_payload() {
+    let bin = std::path::Path::new(env!("CARGO_BIN_EXE_clawguandan"));
+    let out = run_cli_command(bin, &["show", "version", "--json"]).expect("show version --json");
+    let got = String::from_utf8_lossy(&out.stdout);
+    let v: serde_json::Value = serde_json::from_str(&got).expect("valid json");
+    assert_eq!(v.get("name").and_then(|x| x.as_str()), Some(env!("CARGO_PKG_NAME")));
+    assert_eq!(
+        v.get("version").and_then(|x| x.as_str()),
+        Some(env!("CARGO_PKG_VERSION"))
+    );
+    let expected_same = format!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+    assert_eq!(
+        v.get("sameAsVersionFlag").and_then(|x| x.as_str()),
+        Some(expected_same.as_str())
+    );
+    assert!(v.get("target").and_then(|x| x.as_str()).is_some());
+}
+
+#[test]
+fn cli_show_verion_alias_still_works() {
+    let bin = std::path::Path::new(env!("CARGO_BIN_EXE_clawguandan"));
+    let out = run_cli_command(bin, &["show", "verion"]).expect("show verion");
+    let got = String::from_utf8_lossy(&out.stdout);
+    assert!(got.contains(&format!("version: {}", env!("CARGO_PKG_VERSION"))));
+}
+
+#[test]
 fn cli_argv_table_create_matches_clap() {
     let v = cli_argv_table_create(Some("lobby"), Some("8"));
     assert_eq!(

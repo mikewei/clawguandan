@@ -3,10 +3,10 @@ use std::sync::Arc;
 use crate::bot::plugin::{BotDecision, BotTurnContext};
 use crate::bot::policies::{ExchangePolicy, PlayPolicy, TributePolicy};
 
+use super::LlmBotParams;
 use super::parse::{self, parsed_decision_to_bot_decision};
 use super::prompt;
 use super::script;
-use super::LlmBotParams;
 
 #[derive(Debug)]
 pub struct LlmScriptPolicy {

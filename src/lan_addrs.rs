@@ -21,7 +21,10 @@ fn is_wan_ipv4(ip: &Ipv4Addr) -> bool {
 
 #[inline]
 fn is_wan_ipv6(ip: &Ipv6Addr) -> bool {
-    !ip.is_loopback() && !ip.is_unspecified() && !ip.is_unique_local() && !ip.is_unicast_link_local()
+    !ip.is_loopback()
+        && !ip.is_unspecified()
+        && !ip.is_unique_local()
+        && !ip.is_unicast_link_local()
 }
 
 #[inline]
@@ -193,7 +196,10 @@ mod tests {
 
     #[test]
     fn classify_lan_and_wan_tiers() {
-        assert_eq!(classify_url_tier(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2))), 0);
+        assert_eq!(
+            classify_url_tier(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2))),
+            0
+        );
         assert_eq!(classify_url_tier(IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))), 1);
     }
 }

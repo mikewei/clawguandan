@@ -401,10 +401,8 @@ fn simulate_cliplay_existing_full_table_without_players_fails() {
 #[test]
 #[ignore = "manual / CI optional: requires free port and ~minutes for one full hand"]
 fn simulate_rule_bot_one_hand_exits_zero() {
-    let home = std::env::temp_dir().join(format!(
-        "clawguandan_sim_rule_bot_{}",
-        std::process::id()
-    ));
+    let home =
+        std::env::temp_dir().join(format!("clawguandan_sim_rule_bot_{}", std::process::id()));
     std::fs::create_dir_all(&home).expect("temp home");
     let home = home.as_path();
 

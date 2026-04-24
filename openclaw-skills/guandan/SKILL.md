@@ -37,6 +37,7 @@ clawguandan play pass -t <tableId> -p <playerId>
 clawguandan play tribute -t <tableId> -p <playerId> "<card>"
 clawguandan play returncard -t <tableId> -p <playerId> "<card>"
 clawguandan show rules
+clawguandan show version
 ```
 
 - Do not use commands other than those above; do not explore flags on your own, and do not use Web Search for command syntax.
@@ -124,30 +125,33 @@ Decide based on `expect.kind`:
 - Use bombs to **intercept** opponents who are about to go out.
 - Do not spend high-value resources (joker bombs, large bombs, critical wilds) on non-critical tricks.
 
-### Pattern names (quick glossary)
-
-- `single`: 1 card  
-- `pair`: 2 cards of same rank  
-- `triple`: 3 cards of same rank  
-- `full house`: 3 cards of one rank + 2 cards of another rank  
-- `straight`: 5 consecutive ranks (non-flush)  
-- `consecutive pairs`: 3 consecutive pairs (6 cards total)  
-- `plate`: two consecutive triples (6 cards total)  
+### Combination patterns (NOT beating order)
+- `single`: 1 card
+- `pair`: 2 cards of same rank
+- `triple`: 3 cards of same rank
+- `full house`: 3 cards of one rank + 2 cards of another rank
+- `straight`: 5 consecutive ranks (non-flush)
+- `consecutive pairs`: 3 consecutive pairs (6 cards total)
+- `plate`: two consecutive triples (6 cards total)
 - `bomb`: 4+ of a kind, straight flush, or joker bomb
 
-### Beating rules (quick)
-
-- You can **only** play cards that are currently in your own hand.
-- Non-bomb top play: beat with the **same type** only.  
-- Same-type compare:  
-  - Single / pair / triple / full house: compare rank (`full house` compares the triple).  
-  - Straight / consecutive pairs / plate: compare natural top rank with matching structure/length.  
-- Rank order: 🃏R > 🃏b > `handLevel` > A > K > Q > J > 10 > 9 >... , so `handLevel` cards are special high rank (above `A`, below jokers).
-- Any bomb beats any non-bomb.  
-- If top play is a bomb, only a **stronger bomb** can beat it.  
-- Bomb order: `4-card < 5-card < straight flush < 6-card < 7-card < 8-card < 9-card < 10-card < joker bomb`.  
-- Same bomb tier: compare rank; `joker bomb` is highest.  
-- Wildcards can form combos, but do not change beating order.
+### Beating rules
+- Against a non-bomb top play, beat with the same pattern only.
+  - Different non-bomb patterns (even with same rank) are NOT comparable.
+- Same-pattern compare:
+  - single / pair / triple / full house: compare rank (`full house` compares the triple rank).
+  - straight / consecutive pairs / plate: compare natural top rank with matching structure and length.
+- Rank compare:
+  - Rank order (left beats right): 🃏R > 🃏b > `handLevel` > A > K > Q > J > 10 > 9 > 8 > 7 > 6 > 5 > 4 > 3 > 2
+    - **NOTE**: `handLevel` (read from JSON) is the current level rank, that is big in order, and does not slot into A–K–…–2 by printed rank — only as `handLevel` in this order.
+  - Same rank (even with different suits) are equal and can NOT beat each other.
+- Any bomb beats any non-bomb.
+- If top play is a bomb, only a stronger bomb can beat it.
+- Bomb order (left beats right): 4-jokers bomb > 10-card > 9-card > 8-card > 7-card > 6-card > straight flush > 5-card > 4-card.
+  - Do not split bombs when beating.
+- Same bomb tier: compare rank; `4-jokers bomb` is highest.
+- Wildcards can form combinations, but do not change beating order.
+  - Wildcards must be used sparingly, only when necessary.
 
 ### Complete rules
 

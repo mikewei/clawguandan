@@ -2,21 +2,21 @@ use clap::{ArgAction, Parser, Subcommand, ValueEnum};
 use reqwest::StatusCode;
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
+#[cfg(test)]
+use std::collections::HashSet;
 use std::fs;
 use std::net::IpAddr;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-#[cfg(test)]
-use std::collections::HashSet;
-#[cfg(test)]
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 #[cfg(test)]
 use std::sync::Mutex;
+#[cfg(test)]
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -167,7 +167,11 @@ fn observer_session_dir(
         .join(format!("observer.{name}")))
 }
 
-fn player_session_json_path(base: &str, table_id: &str, player_id: &str) -> Result<PathBuf, String> {
+fn player_session_json_path(
+    base: &str,
+    table_id: &str,
+    player_id: &str,
+) -> Result<PathBuf, String> {
     Ok(player_session_dir(base, table_id, player_id)?.join("session.json"))
 }
 
@@ -232,7 +236,11 @@ fn read_session_last_applied_seq(
     Ok(read_player_session(base, table_id, player_id)?.map(|s| s.last_applied_seq))
 }
 
-fn read_auth_session(base: &str, table_id: &str, player_id: &str) -> Result<Option<AuthSession>, String> {
+fn read_auth_session(
+    base: &str,
+    table_id: &str,
+    player_id: &str,
+) -> Result<Option<AuthSession>, String> {
     let path = player_auth_json_path(base, table_id, player_id)?;
     if !path.exists() {
         return Ok(None);
@@ -264,7 +272,8 @@ fn resolve_player_key(
         return Ok(trimmed.to_string());
     }
     let auth = read_auth_session(base, table_id, player_id)?.ok_or_else(|| {
-        "missing playerKey for this player; run `table join` again or pass `--player-key`".to_string()
+        "missing playerKey for this player; run `table join` again or pass `--player-key`"
+            .to_string()
     })?;
     if auth.player_id != player_id {
         return Err(format!(
@@ -326,15 +335,19 @@ fn read_session_last_applied_seq_observer(
     table_id: &str,
     observer_name: &str,
 ) -> Result<Option<u64>, String> {
-    Ok(
-        read_observer_session(base, table_id, observer_name)?.map(|s| s.last_applied_seq),
-    )
+    Ok(read_observer_session(base, table_id, observer_name)?.map(|s| s.last_applied_seq))
 }
 
 fn base_url(cfg: &CliConfig) -> Result<String, String> {
-    cfg.server_url
-        .clone()
-        .ok_or_else(|| "no active server: run `clawguandan server use <hostOrIp[:port]>`".into())
+    cfg.server_url.clone().ok_or_else(|| {
+        err_with_hints(
+            "no active server",
+            &[
+                "run `clawguandan server start` for local default server",
+                "or run `clawguandan server use <hostOrIp[:port]>`",
+            ],
+        )
+    })
 }
 
 /// Stable origin key for dedup (`http`/`https`, host case-folded for domains, port).
@@ -438,7 +451,9 @@ fn merge_and_sort_web_ui_urls(v: &serde_json::Value, active_base: Option<&str>) 
             .cmp(&classify_web_ui_url_tier(b))
             .then_with(|| a.cmp(b))
     });
-    if urls.is_empty() && let Some(ab) = active_base {
+    if urls.is_empty()
+        && let Some(ab) = active_base
+    {
         urls.push(normalize_base(ab));
     }
     urls
@@ -528,7 +543,10 @@ fn normalize_base(url: &str) -> String {
 #[command(
     name = "clawguandan",
     version,
-    about = "Guan Dan — Server + API client"
+    about = "Guan Dan — Server + API client",
+    before_help = "Run a GuanDan game server and operate tables, players, and bots from the command line.",
+    long_about = "CLI for running a Guan Dan server and operating tables/players/bots via API.\nUse it to start a local server, create or join tables, play actions, and automate games with bots.",
+    after_help = "Quick start:\n  clawguandan server start\n  clawguandan table create my-table\n  clawguandan table join -t <table_id> --name Alice\n\nTroubleshooting:\n  1) Run `clawguandan <command> -h` for required flags.\n  2) Runtime failures print `hint:` lines with next steps.\n  3) Most runtime errors exit with code 1."
 )]
 pub(crate) struct Cli {
     #[command(subcommand)]
@@ -543,7 +561,7 @@ pub(crate) enum Top {
         #[command(subcommand)]
         cmd: Option<ServerCmd>,
     },
-    /// Table commands
+    /// Manage tables: list/create/join/snapshot/sync
     Table {
         #[command(subcommand)]
         cmd: TableCmd,
@@ -553,7 +571,7 @@ pub(crate) enum Top {
         #[command(subcommand)]
         cmd: PlayCmd,
     },
-    /// Full-table automation via subprocess CLI only (see `bot beat-it`)
+    /// Automate full-table play with built-in, rule-based, or LLM bots
     Bot {
         #[command(subcommand)]
         cmd: BotCmd,
@@ -573,11 +591,18 @@ pub(crate) enum ShowCmd {
         #[arg(long, default_value = "en")]
         lang: String,
     },
+    /// Print detailed version/build information
+    #[command(name = "version", visible_alias = "verion")]
+    Version {
+        /// Output as JSON
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
 pub(crate) enum BotCmd {
-    /// Run bots via CLI subprocesses. Optionally target an existing table; otherwise create one.
+    /// Run simple bots with an always-beat preference strategy. Optionally target an existing table; otherwise create one.
     BeatIt {
         /// Optional existing table ID to join. If omitted, creates a fresh table.
         #[arg(short = 't', long)]
@@ -640,8 +665,8 @@ pub(crate) enum BotCmd {
         #[arg(long)]
         llm_timeout_ms: Option<u64>,
         /// Before join, call script once to parse `<<<NAMING:LIST|...>>>` for bot display names (default: on; pass `false` to disable).
-        #[arg(long, num_args = 0..=1, default_missing_value = "true", value_parser = clap::value_parser!(bool))]
-        llm_name_bots: Option<bool>,
+        #[arg(long, action = ArgAction::Set, default_value_t = true, value_name = "true|false")]
+        llm_name_bots: bool,
         /// LLM model name for bot joins (`table join --type bot --model ...`).
         #[arg(long)]
         model: Option<String>,
@@ -655,6 +680,7 @@ pub(crate) enum DefaultScriptKind {
 }
 
 #[derive(Subcommand)]
+#[command(after_help = "Tip: `server` defaults to `status` when no subcommand is given.")]
 pub(crate) enum ServerCmd {
     /// Run the Axum server in the foreground
     Serve {
@@ -687,6 +713,9 @@ pub(crate) enum ServerCmd {
 }
 
 #[derive(Subcommand)]
+#[command(
+    after_help = "Agent tips:\n  - Use `table join -t <id> --name <name>` to get player credentials.\n  - Use `table sync` to refresh local session state before play actions.\n  - Observer mode: omit `-p` and optionally set `--observer-name`."
+)]
 pub(crate) enum TableCmd {
     /// List tables on the active server (default omits `hand`; use `--detail` for full public state)
     List {
@@ -764,6 +793,9 @@ pub(crate) enum TableCmd {
 }
 
 #[derive(Subcommand)]
+#[command(
+    after_help = "Agent tips:\n  - Most actions auto-use stored seq; run `table sync` if you see stale-seq errors.\n  - Use `-k/--player-key` to override local credentials when required."
+)]
 pub(crate) enum PlayCmd {
     /// Mark ready (ready=true)
     Ready {
@@ -856,17 +888,26 @@ pub(crate) enum PlayCmd {
         #[arg(long)]
         seq: Option<u64>,
     },
-    /// Start next hand from scoring phase
-    NextHand {
-        #[arg(short = 't', long)]
-        table_id: String,
-        #[arg(short = 'p', long)]
-        player_id: String,
-        #[arg(short = 'k', long)]
-        player_key: Option<String>,
-        #[arg(long)]
-        seq: Option<u64>,
-    },
+}
+
+fn err_with_hint(message: impl Into<String>, hint: impl AsRef<str>) -> String {
+    format!("{}\nhint: {}", message.into(), hint.as_ref())
+}
+
+fn err_with_hints(message: impl Into<String>, hints: &[&str]) -> String {
+    let mut out = message.into();
+    for hint in hints {
+        out.push_str("\nhint: ");
+        out.push_str(hint);
+    }
+    out
+}
+
+fn err_http_status(action: &str, status: StatusCode, hint: impl AsRef<str>) -> String {
+    err_with_hint(
+        format!("{action} failed: {status}"),
+        format!("{} (status={status})", hint.as_ref()),
+    )
 }
 
 /// Everything except [`ServerCmd::Serve`], [`ServerCmd::Start`], and [`ServerCmd::Restart`]
@@ -877,8 +918,10 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
             let cmd = cmd.unwrap_or(ServerCmd::Status);
             match cmd {
                 ServerCmd::Serve { .. } | ServerCmd::Start { .. } | ServerCmd::Restart { .. } => {
-                    Err("internal: Serve/Start/Restart must be started from main with a Tokio runtime"
-                        .into())
+                    Err(err_with_hint(
+                        "internal: Serve/Start/Restart must be started from main with a Tokio runtime",
+                        "invoke these commands from CLI entrypoint instead of run_from_top()",
+                    ))
                 }
                 ServerCmd::Stop => server_stop(),
                 ServerCmd::Use { host_or_port } => server_use(host_or_port),
@@ -971,7 +1014,7 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 script,
                 default_script,
                 llm_timeout_ms,
-                llm_name_bots.unwrap_or(true),
+                llm_name_bots,
                 model,
             ),
         },
@@ -982,6 +1025,37 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 print!("{md}");
                 if !md.ends_with('\n') {
                     println!();
+                }
+                Ok(())
+            }
+            ShowCmd::Version { json } => {
+                let name = env!("CARGO_PKG_NAME");
+                let version = env!("CARGO_PKG_VERSION");
+                let same = format!("{name} {version}");
+                let target = format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH);
+                let build_profile = option_env!("PROFILE");
+                if json {
+                    let mut obj = serde_json::Map::new();
+                    obj.insert("name".to_string(), json!(name));
+                    obj.insert("version".to_string(), json!(version));
+                    obj.insert("sameAsVersionFlag".to_string(), json!(same));
+                    obj.insert("target".to_string(), json!(target));
+                    if let Some(profile) = build_profile {
+                        obj.insert("buildProfile".to_string(), json!(profile));
+                    }
+                    println!(
+                        "{}",
+                        serde_json::to_string_pretty(&Value::Object(obj))
+                            .map_err(|e| e.to_string())?
+                    );
+                } else {
+                    println!("name: {name}");
+                    println!("version: {version}");
+                    println!("same_as_--version: {same}");
+                    if let Some(profile) = build_profile {
+                        println!("build_profile: {profile}");
+                    }
+                    println!("target: {target}");
                 }
                 Ok(())
             }
@@ -1078,9 +1152,6 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 player_key,
                 seq,
             } => play_action(table_id, player_id, player_key, seq, "pass", json!({})),
-            PlayCmd::NextHand { .. } => {
-                return Err("next_hand CLI command has been removed; hands now advance automatically after scoring".into());
-            }
         },
     }
 }
@@ -1110,11 +1181,17 @@ async fn probe_clawguandan_server_async(base: &str) -> Result<(), String> {
     let url = format!("{}/ping", normalize_base(base).trim_end_matches('/'));
     let r = client.get(&url).send().await.map_err(|e| e.to_string())?;
     if !r.status().is_success() {
-        return Err(format!("probe failed: HTTP {}", r.status()));
+        return Err(err_with_hint(
+            format!("probe failed: HTTP {}", r.status()),
+            "verify server address with `clawguandan server use <host:port>` or start local with `clawguandan server start`",
+        ));
     }
     let v: serde_json::Value = r.json().await.map_err(|e| e.to_string())?;
     if v.get("pong").and_then(|x| x.as_str()) != Some("clawguandan") {
-        return Err("probe failed: not a clawguandan server (missing or wrong pong)".into());
+        return Err(err_with_hint(
+            "probe failed: not a clawguandan server (missing or wrong pong)",
+            "target must provide GET /ping and return {\"pong\":\"clawguandan\"}",
+        ));
     }
     Ok(())
 }
@@ -1144,9 +1221,12 @@ pub async fn server_start(auto_use: bool) -> Result<(), String> {
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| {
-            format!(
-                "failed to spawn `{}` (set CLAW_GUANDAN_SERVER_BIN): {}",
-                server_bin, e
+            err_with_hint(
+                format!(
+                    "failed to spawn `{}` (set CLAW_GUANDAN_SERVER_BIN): {}",
+                    server_bin, e
+                ),
+                "ensure the binary path exists and is executable, or unset CLAW_GUANDAN_SERVER_BIN",
             )
         })?;
 
@@ -1320,7 +1400,11 @@ fn table_list(detail: bool) -> Result<(), String> {
     }
     let r = client.get(u.as_str()).send().map_err(|e| e.to_string())?;
     if !r.status().is_success() {
-        return Err(format!("list failed: {}", r.status()));
+        return Err(err_http_status(
+            "list",
+            r.status(),
+            "run `clawguandan server status` and verify the active server before retry",
+        ));
     }
     let v: serde_json::Value = r.json().map_err(|e| e.to_string())?;
     println!(
@@ -1340,7 +1424,11 @@ fn table_create(name: Option<String>, rank: Option<String>) -> Result<(), String
         .send()
         .map_err(|e| e.to_string())?;
     if !r.status().is_success() {
-        return Err(format!("create failed: {}", r.status()));
+        return Err(err_http_status(
+            "create",
+            r.status(),
+            "check `--rank` value (2-10,J,Q,K,A) and ensure server is healthy",
+        ));
     }
     let v: serde_json::Value = r.json().map_err(|e| e.to_string())?;
     println!(
@@ -1356,7 +1444,12 @@ fn parse_player_type(s: Option<String>) -> Result<Option<String>, String> {
         Some("human") => Some("human".into()),
         Some("bot") => Some("bot".into()),
         Some("unknown") => Some("unknown".into()),
-        Some(x) => return Err(format!("invalid player type {:?}", x)),
+        Some(x) => {
+            return Err(err_with_hint(
+                format!("invalid player type {:?}", x),
+                "use one of: human, random, smart, bot",
+            ));
+        }
     })
 }
 
@@ -1443,7 +1536,8 @@ fn fmt_value_pretty_compact(v: &Value, out: &mut String, depth: usize) -> Result
         Value::Bool(false) => out.push_str("false"),
         Value::Number(n) => out.push_str(&n.to_string()),
         Value::String(s) => {
-            let enc = serde_json::to_string(&Value::String(s.clone())).map_err(|e| e.to_string())?;
+            let enc =
+                serde_json::to_string(&Value::String(s.clone())).map_err(|e| e.to_string())?;
             out.push_str(&enc);
         }
         Value::Array(arr) => {
@@ -1474,8 +1568,8 @@ fn fmt_value_pretty_compact(v: &Value, out: &mut String, depth: usize) -> Result
             let entries: Vec<(&String, &Value)> = map.iter().collect();
             for (i, (k, val)) in entries.iter().enumerate() {
                 out.push_str(&pad(depth + 1));
-                let key_json =
-                    serde_json::to_string(&Value::String((*k).to_string())).map_err(|e| e.to_string())?;
+                let key_json = serde_json::to_string(&Value::String((*k).to_string()))
+                    .map_err(|e| e.to_string())?;
                 out.push_str(&key_json);
                 out.push_str(": ");
                 if key_suffix_triggers_compact_array(k) && val.is_array() {
@@ -1544,7 +1638,10 @@ fn build_session_full_value(session: &PlayerSession) -> Result<Value, String> {
     Ok(m)
 }
 
-fn print_materialized_session(session: &PlayerSession, mode: MaterializedPrintMode) -> Result<(), String> {
+fn print_materialized_session(
+    session: &PlayerSession,
+    mode: MaterializedPrintMode,
+) -> Result<(), String> {
     let v = match mode {
         MaterializedPrintMode::Summary => build_session_summary_value(session)?,
         MaterializedPrintMode::Full => build_session_full_value(session)?,
@@ -1568,8 +1665,8 @@ fn http_get_snapshot_parsed(
     .map_err(|e| e.to_string())?;
     if let Some(pid) = player_id {
         u.query_pairs_mut().append_pair("playerId", pid);
-        let pkey = player_key
-            .ok_or_else(|| "playerKey is required when playerId is set".to_string())?;
+        let pkey =
+            player_key.ok_or_else(|| "playerKey is required when playerId is set".to_string())?;
         u.query_pairs_mut().append_pair("playerKey", pkey);
     }
     let r = client.get(u).send().map_err(|e| e.to_string())?;
@@ -1592,7 +1689,8 @@ fn ensure_session_bootstrap(
 ) -> Result<PlayerSession, String> {
     let mut s = read_player_session(base, table_id, player_id)?.unwrap_or_default();
     if s.table_state.is_none() {
-        let snap = http_get_snapshot_parsed(base, client, table_id, Some(player_id), Some(player_key))?;
+        let snap =
+            http_get_snapshot_parsed(base, client, table_id, Some(player_id), Some(player_key))?;
         s.table_state = Some(snap.state);
         s.private_view = snap.private;
         s.last_applied_seq = s.table_state.as_ref().map(|t| t.seq).unwrap_or(0);
@@ -1673,11 +1771,15 @@ fn play_suggest(
     let seq = if let Some(s) = manual_seq {
         s
     } else {
-        read_session_last_applied_seq(&base, &table_id, &player_id)?
-            .ok_or_else(|| {
-                "auto-seq: no stored lastAppliedSeq for this player; run `table sync` or `table nextstate` with `-p` first, or pass `--seq`"
-                    .to_string()
-            })?
+        read_session_last_applied_seq(&base, &table_id, &player_id)?.ok_or_else(|| {
+            err_with_hints(
+                "auto-seq: no stored lastAppliedSeq for this player",
+                &[
+                    "run `table sync -t <table_id> -p <player_id>` to bootstrap local session",
+                    "or pass `--seq` explicitly",
+                ],
+            )
+        })?
     };
     let mut u = Url::parse(&format!(
         "{}/api/v1/tables/{}/suggest",
@@ -1732,7 +1834,11 @@ fn table_join(
         .send()
         .map_err(|e| e.to_string())?;
     if !r.status().is_success() {
-        return Err(format!("join failed: {}", r.status()));
+        return Err(err_http_status(
+            "join",
+            r.status(),
+            "verify --table-id exists and --seat is one of auto/n/e/s/w",
+        ));
     }
     let v: serde_json::Value = r.json().map_err(|e| e.to_string())?;
     let pid = v["playerId"]
@@ -1763,14 +1869,7 @@ fn table_join(
         "{}",
         serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?
     );
-    table_sync(
-        table_id,
-        Some(pid),
-        Some(pkey),
-        None,
-        None,
-        None,
-    )
+    table_sync(table_id, Some(pid), Some(pkey), None, None, None)
 }
 
 fn table_nextstate(
@@ -1787,7 +1886,10 @@ fn table_nextstate(
     let observer_key: Option<&str> = if player_id.is_none() && manual_seq.is_none() {
         let on = observer_name.as_deref().unwrap_or("default").trim();
         if on.is_empty() {
-            return Err("invalid --observer-name: empty".into());
+            return Err(err_with_hint(
+                "invalid --observer-name: empty",
+                "omit --observer-name to use default, or provide a non-empty value",
+            ));
         }
         validate_session_id_component(on, "observer_name")?;
         Some(on)
@@ -1846,7 +1948,11 @@ fn table_nextstate(
             }
             Ok(())
         }
-        _ => Err(format!("nextstate failed: {}", r.status())),
+        _ => Err(err_http_status(
+            "nextstate",
+            r.status(),
+            "verify table id and credentials, then retry or run `table snapshot` for diagnostics",
+        )),
     }
 }
 
@@ -1859,7 +1965,10 @@ fn table_sync(
     observer_name: Option<String>,
 ) -> Result<(), String> {
     if manual_seq.is_some() {
-        return Err("table sync does not support --seq (uses session auto-seq)".into());
+        return Err(err_with_hint(
+            "table sync does not support --seq (uses session auto-seq)",
+            "remove --seq; for manual seq control use `table nextstate --seq`",
+        ));
     }
     let base = load_active_server_base()?;
     let client = http_client()?;
@@ -1871,7 +1980,10 @@ fn table_sync(
         None => {
             let on = observer_name.as_deref().unwrap_or("default").trim();
             if on.is_empty() {
-                return Err("invalid --observer-name: empty".into());
+                return Err(err_with_hint(
+                    "invalid --observer-name: empty",
+                    "omit --observer-name to use default, or provide a non-empty value",
+                ));
             }
             validate_session_id_component(on, "observer_name")?;
             ensure_session_bootstrap_observer(&base, &client, &table_id, on)?;
@@ -1892,12 +2004,20 @@ fn table_sync(
                     }
                     s if s.is_success() => {
                         let body: NextStateBody = r.json().map_err(|e| e.to_string())?;
-                        merge_nextstate_into_observer_session(&base, &client, &table_id, on, &body)?;
+                        merge_nextstate_into_observer_session(
+                            &base, &client, &table_id, on, &body,
+                        )?;
                         if body.lag == 0 {
                             break;
                         }
                     }
-                    _ => return Err(format!("nextstate failed: {}", r.status())),
+                    _ => {
+                        return Err(err_http_status(
+                            "nextstate",
+                            r.status(),
+                            "verify table id and active server before retrying sync",
+                        ));
+                    }
                 }
             }
 
@@ -1934,7 +2054,13 @@ fn table_sync(
                             break;
                         }
                     }
-                    _ => return Err(format!("nextstate failed: {}", r.status())),
+                    _ => {
+                        return Err(err_http_status(
+                            "nextstate",
+                            r.status(),
+                            "verify -p/-k credentials and table state before retrying sync",
+                        ));
+                    }
                 }
             }
 
@@ -1958,7 +2084,10 @@ fn play_wait4myturn(
 ) -> Result<(), String> {
     const WAIT4MYTURN_NEXTSTATE_MAX_TIMEOUT_MS: u64 = 60_000;
     if manual_seq.is_some() {
-        return Err("play wait4myturn does not support --seq (uses session auto-seq)".into());
+        return Err(err_with_hint(
+            "play wait4myturn does not support --seq (uses session auto-seq)",
+            "remove --seq and run `table sync -t <table_id> -p <player_id>` first if session is stale",
+        ));
     }
     // Catch up to server head with timeoutMs=0 nextstate loop (no long-poll at head), so the
     // local shortcut below cannot fire on a stale session while the table has moved on.
@@ -1993,9 +2122,12 @@ fn play_wait4myturn(
             Some(dl) => {
                 let now = Instant::now();
                 if now >= dl {
-                    return Err(format!(
-                        "wait4myturn timeout after {}ms",
-                        budget_ms.unwrap_or_default()
+                    return Err(err_with_hint(
+                        format!(
+                            "wait4myturn timeout after {}ms",
+                            budget_ms.unwrap_or_default()
+                        ),
+                        "increase --timeout-ms, or inspect state via `table snapshot` / `table nextstate`",
                     ));
                 }
                 let remaining_ms_u128 = dl.saturating_duration_since(now).as_millis();
@@ -2043,7 +2175,13 @@ fn play_wait4myturn(
                     }
                 }
             }
-            _ => return Err(format!("nextstate failed: {}", r.status())),
+            _ => {
+                return Err(err_http_status(
+                    "nextstate",
+                    r.status(),
+                    "verify table id and player credentials, then retry `play wait4myturn`",
+                ));
+            }
         }
     }
 }
@@ -2084,14 +2222,7 @@ fn play_ready(
     if no_sync {
         return Ok(());
     }
-    table_sync(
-        table_id,
-        Some(player_id),
-        player_key,
-        None,
-        None,
-        None,
-    )
+    table_sync(table_id, Some(player_id), player_key, None, None, None)
 }
 
 fn play_action(
@@ -2110,10 +2241,15 @@ fn play_action(
         let seq = if let Some(s) = manual_seq {
             s
         } else {
-            read_session_last_applied_seq(&base, &table_id, &player_id)?
-                .ok_or_else(|| {
-                    "auto-seq: no stored lastAppliedSeq for this player; run `table nextstate` first or pass `--seq`".to_string()
-                })?
+            read_session_last_applied_seq(&base, &table_id, &player_id)?.ok_or_else(|| {
+                err_with_hints(
+                    "auto-seq: no stored lastAppliedSeq for this player",
+                    &[
+                        "run `table sync -t <table_id> -p <player_id>` to refresh local session",
+                        "or pass `--seq` explicitly",
+                    ],
+                )
+            })?
         };
         payload["playerId"] = json!(&player_id);
         payload["playerKey"] = json!(&pkey);
@@ -2166,9 +2302,13 @@ fn play_action(
             retried_after_stale_seq = true;
             continue;
         }
-        return Err(
-            serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!("{} failed", action))
-        );
+        return Err(err_with_hints(
+            serde_json::to_string_pretty(&v).unwrap_or_else(|_| format!("{action} failed")),
+            &[
+                "if error code is STALE_SEQ, run `table sync` then retry",
+                "use `-k/--player-key` to override stale local credentials when needed",
+            ],
+        ));
     }
 }
 
@@ -2500,8 +2640,7 @@ impl CliplayShared {
     }
 
     fn on_transition_maybe_terminal(&self, v: &serde_json::Value) {
-        let terminal_by_type =
-            v.get("type").and_then(|x| x.as_str()) == Some("GAME_COMPLETED");
+        let terminal_by_type = v.get("type").and_then(|x| x.as_str()) == Some("GAME_COMPLETED");
         let terminal_by_delta = v
             .get("delta")
             .and_then(|d| d.get("ops"))
@@ -2731,7 +2870,10 @@ fn verify_llm_script_model(
         Ok(model) => Ok(model),
         Err(e) => {
             eprintln!("[llm-bot] script self-check error: {e}");
-            Err(llm_script_self_check_failure_message(is_default_script, script))
+            Err(llm_script_self_check_failure_message(
+                is_default_script,
+                script,
+            ))
         }
     }
 }
@@ -2757,7 +2899,9 @@ fn session_dirs_use_host_table_leaf_layout() {
     let pd = player_session_dir(base, "t_abc", "p_xyz").unwrap();
     assert_eq!(pd.file_name().and_then(|s| s.to_str()), Some("p_xyz"));
     assert_eq!(
-        pd.parent().and_then(|p| p.file_name()).and_then(|s| s.to_str()),
+        pd.parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str()),
         Some("t_abc")
     );
     assert_eq!(
@@ -2775,7 +2919,9 @@ fn session_dirs_use_host_table_leaf_layout() {
         Some("observer.default")
     );
     assert_eq!(
-        od.parent().and_then(|p| p.file_name()).and_then(|s| s.to_str()),
+        od.parent()
+            .and_then(|p| p.file_name())
+            .and_then(|s| s.to_str()),
         Some("t_abc")
     );
     assert!(od.starts_with(session_state_root()));

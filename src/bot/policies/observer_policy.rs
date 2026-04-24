@@ -63,7 +63,11 @@ impl ObserverPolicy for DefaultObserverPolicy {
         if ctx.verbosity >= 1 {
             println!(
                 "[{}][I][hand:start] table={} hand={} seq={} type={}",
-                ctx.plugin_id, ctx.table_id, ctx.hand_index, ctx.transition_seq, ctx.transition_type
+                ctx.plugin_id,
+                ctx.table_id,
+                ctx.hand_index,
+                ctx.transition_seq,
+                ctx.transition_type
             );
         }
         Ok(())

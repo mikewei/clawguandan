@@ -84,7 +84,8 @@ pub fn extract_rule_features(
     let teammate_remaining = teammate_seat
         .as_ref()
         .and_then(|seat| remaining_count_by_seat(state, seat));
-    let enemy_min_remaining = min_enemy_remaining(state, my_seat.as_deref(), teammate_seat.as_deref());
+    let enemy_min_remaining =
+        min_enemy_remaining(state, my_seat.as_deref(), teammate_seat.as_deref());
     let enemy_low_cards_urgent = enemy_min_remaining
         .map(|r| r <= enemy_low_cards_threshold)
         .unwrap_or(false);
@@ -118,7 +119,11 @@ fn remaining_count_by_seat(state: &Value, seat: &str) -> Option<u8> {
         .map(|x| x as u8)
 }
 
-fn min_enemy_remaining(state: &Value, my_seat: Option<&str>, teammate_seat: Option<&str>) -> Option<u8> {
+fn min_enemy_remaining(
+    state: &Value,
+    my_seat: Option<&str>,
+    teammate_seat: Option<&str>,
+) -> Option<u8> {
     let seats = state.get("seats").and_then(|x| x.as_object())?;
     seats
         .iter()

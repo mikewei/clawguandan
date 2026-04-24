@@ -54,7 +54,10 @@ fn collect_spans(stdout: &str) -> Vec<Span> {
         Regex::new(r"<<<DECISION:([A-Za-z0-9_-]+)(?:\|(.*))?>>>").expect("valid DECISION regex");
     for cap in re_decision.captures_iter(stdout) {
         let m = cap.get(0).expect("whole match");
-        let kind = cap.get(1).map(|x| x.as_str().to_string()).unwrap_or_default();
+        let kind = cap
+            .get(1)
+            .map(|x| x.as_str().to_string())
+            .unwrap_or_default();
         let payload = cap
             .get(2)
             .map(|x| x.as_str().to_string())
@@ -68,7 +71,10 @@ fn collect_spans(stdout: &str) -> Vec<Span> {
     let re_naming = Regex::new(r"<<<NAMING:LIST\|(.*?)>>>").expect("valid NAMING regex");
     for cap in re_naming.captures_iter(stdout) {
         let m = cap.get(0).expect("whole match");
-        let payload = cap.get(1).map(|x| x.as_str().to_string()).unwrap_or_default();
+        let payload = cap
+            .get(1)
+            .map(|x| x.as_str().to_string())
+            .unwrap_or_default();
         out.push(Span {
             start: m.start(),
             kind: SpanKind::NamingList { payload },
@@ -89,12 +95,7 @@ fn last_span(stdout: &str, allow_naming: bool) -> Option<SpanKind> {
 
 fn last_span_for_naming(stdout: &str) -> Option<SpanKind> {
     let mut spans = collect_spans(stdout);
-    spans.retain(|s| {
-        matches!(
-            s.kind,
-            SpanKind::Default | SpanKind::NamingList { .. }
-        )
-    });
+    spans.retain(|s| matches!(s.kind, SpanKind::Default | SpanKind::NamingList { .. }));
     spans.pop().map(|s| s.kind)
 }
 
@@ -265,11 +266,7 @@ pub fn validate_decision_against_state(decision: BotDecision, state: &Value) -> 
                 let hints_ok = state
                     .get("private")
                     .and_then(|p| p.get("playHints"))
-                    .map(|h| {
-                        h.get("canPlay")
-                            .and_then(|x| x.as_bool())
-                            .unwrap_or(true)
-                    })
+                    .map(|h| h.get("canPlay").and_then(|x| x.as_bool()).unwrap_or(true))
                     .unwrap_or(true);
                 if hints_ok {
                     decision
@@ -294,7 +291,10 @@ pub fn validate_decision_against_state(decision: BotDecision, state: &Value) -> 
             }
         }
         BotDecision::Action(PlayerAction::ReturnCard { .. }) => {
-            if legal.iter().any(|s| s == "return_card" || s == "returnCard") {
+            if legal
+                .iter()
+                .any(|s| s == "return_card" || s == "returnCard")
+            {
                 decision
             } else {
                 BotDecision::UseSuggest

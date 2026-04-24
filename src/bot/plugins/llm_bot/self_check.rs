@@ -19,7 +19,10 @@ Reply with exactly one marker line and nothing else:\n{EXPECTED_MARKER_EXAMPLE}\
     })
 }
 
-pub fn resolve_join_model(explicit_model: Option<String>, detected_model: String) -> Option<String> {
+pub fn resolve_join_model(
+    explicit_model: Option<String>,
+    detected_model: String,
+) -> Option<String> {
     let explicit = explicit_model.and_then(|m| {
         let t = m.trim();
         if t.is_empty() {

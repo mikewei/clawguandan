@@ -78,10 +78,7 @@ pub fn run_script_with_timeout(
         if Instant::now() > deadline {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(format!(
-                "script timeout after {}ms",
-                timeout.as_millis()
-            ));
+            return Err(format!("script timeout after {}ms", timeout.as_millis()));
         }
         match child.try_wait().map_err(|e| e.to_string())? {
             None => std::thread::sleep(Duration::from_millis(25)),
@@ -120,10 +117,7 @@ pub fn run_script_with_timeout(
     }
     if verbosity >= 2 {
         if !stderr.trim().is_empty() {
-            println!(
-                "{log_prefix} stderr:\n{}",
-                stderr.trim_end()
-            );
+            println!("{log_prefix} stderr:\n{}", stderr.trim_end());
         } else {
             println!("{log_prefix} stderr: (empty)");
         }

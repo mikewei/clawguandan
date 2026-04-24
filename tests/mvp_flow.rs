@@ -135,7 +135,13 @@ async fn list_tables_detail_hand_matches_observer_snapshot() {
 
 async fn create_ready_table(
     app: axum::Router,
-) -> (axum::Router, String, Vec<String>, HashMap<String, String>, u64) {
+) -> (
+    axum::Router,
+    String,
+    Vec<String>,
+    HashMap<String, String>,
+    u64,
+) {
     let res = app
         .clone()
         .oneshot(
@@ -716,7 +722,11 @@ async fn nextstate_observer_has_prompt_and_no_private() {
     assert_eq!(observer_res.status(), StatusCode::OK);
     let observer_body = read_json(observer_res).await;
     assert!(observer_body.get("private").is_none());
-    assert!(observer_body["prompt"].as_str().is_some_and(|s| !s.is_empty()));
+    assert!(
+        observer_body["prompt"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty())
+    );
 
     let pid = &pids[0];
     let pkey = keys.get(pid).unwrap();
@@ -739,7 +749,11 @@ async fn nextstate_observer_has_prompt_and_no_private() {
     assert_eq!(player_res.status(), StatusCode::OK);
     let player_body = read_json(player_res).await;
     assert!(player_body.get("private").is_some());
-    assert!(player_body["prompt"].as_str().is_some_and(|s| !s.is_empty()));
+    assert!(
+        player_body["prompt"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty())
+    );
 }
 
 #[tokio::test]
@@ -790,7 +804,10 @@ async fn join_returns_player_key() {
         )
         .await
         .unwrap();
-    let table_id = read_json(res).await["tableId"].as_str().unwrap().to_string();
+    let table_id = read_json(res).await["tableId"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let res = app
         .oneshot(
@@ -825,7 +842,10 @@ async fn snapshot_with_player_id_requires_player_key() {
         )
         .await
         .unwrap();
-    let table_id = read_json(res).await["tableId"].as_str().unwrap().to_string();
+    let table_id = read_json(res).await["tableId"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let res = app
         .clone()
         .oneshot(
@@ -840,13 +860,19 @@ async fn snapshot_with_player_id_requires_player_key() {
         )
         .await
         .unwrap();
-    let pid = read_json(res).await["playerId"].as_str().unwrap().to_string();
+    let pid = read_json(res).await["playerId"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let res = app
         .oneshot(
             Request::builder()
                 .method("GET")
-                .uri(format!("/api/v1/tables/{}/snapshot?playerId={}", table_id, pid))
+                .uri(format!(
+                    "/api/v1/tables/{}/snapshot?playerId={}",
+                    table_id, pid
+                ))
                 .body(Body::empty())
                 .unwrap(),
         )

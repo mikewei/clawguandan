@@ -1100,9 +1100,9 @@ async fn straight_flush_play_is_legal_and_recorded() {
 
     let player_snap = snapshot_player(&app, &table_id, &pids[1]).await;
     assert!(
-        player_snap["narration"].as_str().is_some_and(|s| {
-            s.contains("同花顺炸") || s.contains("straight flush bomb")
-        }),
+        player_snap["narration"]
+            .as_str()
+            .is_some_and(|s| { s.contains("同花顺炸") || s.contains("straight flush bomb") }),
         "expected straight-flush narration, got {:?}",
         player_snap["narration"]
     );
@@ -1148,7 +1148,9 @@ async fn inactive_player_marks_away_and_ends_game_without_scoring() {
         .as_array()
         .expect("awayPlayerIds");
     assert!(
-        away_ids.iter().any(|v| v.as_str() == Some(pids[1].as_str())),
+        away_ids
+            .iter()
+            .any(|v| v.as_str() == Some(pids[1].as_str())),
         "expected awayPlayerIds to include timed-out player"
     );
 

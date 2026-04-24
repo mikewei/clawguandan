@@ -36,7 +36,7 @@ cargo run --bin clawguandan -- play ready -t <tableId> -p <playerId> -k <playerK
 
 - 正文随二进制嵌入在 [`web/rules/`](web/rules/)（英文 `rules_en.md`、中文 `rules_zh.md`）；完整叙述仍以 [`doc/guandan_rules_en.md`](doc/guandan_rules_en.md) / [`doc/guandan_rules_zh.md`](doc/guandan_rules_zh.md) 为准。
 - **HTTP**：`GET /api/v1/rules`（默认 `lang=en`），或 `GET /api/v1/rules?lang=zh`。响应为 Markdown，`Content-Type: text/markdown; charset=utf-8`。
-- **CLI**（无需已配置 server）：`clawguandan show rules`、`clawguandan show rules --lang zh`。
+- **CLI**（无需已配置 server）：`clawguandan show rules`、`clawguandan show rules --lang zh`、`clawguandan show version`（打印详细版本/构建信息，支持 `--json`；兼容旧别名 `show verion`）。
 
 ## 测试
 
