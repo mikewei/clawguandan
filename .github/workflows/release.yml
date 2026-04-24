@@ -277,6 +277,29 @@ jobs:
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
 
           gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://npmjs.org'
+      - name: Publish to NPM
+        shell: bash
+        run: |
+          # 1. 进入包目录
+          cd target/distrib/clawguandan-npm-package
+          # 2. 从 package.json 提取版本号
+          VERSION=$(node -p "require('./package.json').version")
+          echo "Detected version: $VERSION"
+          # 3. 判断是否包含连字符 '-'
+          if [[ "$VERSION" == *"-"* ]]; then
+            echo "Pre-release version detected. Publishing with --tag beta..."
+            npm publish --access public --tag beta
+          else
+            echo "Stable version detected. Publishing to latest..."
+            npm publish --access public
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_SECRET }}
 
   announce:
     needs:
