@@ -94,12 +94,12 @@ Decide based on `expect.kind`:
 3) **`exchange`** (return after tribute): `clawguandan play returncard -t <tableId> -p <playerId> "<card>"`
    - Return the **lowest-value** unwanted single card, **different** from the tribute card you received.
 4) **`play`**: either `clawguandan play playcards -t <tableId> -p <playerId> "<c1,c2,...>"` or `clawguandan play pass -t <tableId> -p <playerId>`
-   - If you are **leading a new trick** (`topPlay` empty or your side just won the lead):
-     1. Prefer the **smallest legal non-bomb** combination (singles → pairs → triples → full houses → straights → tubes → plates, etc., play low).
-     2. Keep **bombs** and high power (jokers, **level cards**, important **wild** usage) for later counterplay.
-   - If you must **beat** `topPlay`:
-     1. First find the **smallest same-type** combination that still beats it;
-     2. If nothing of the same type beats it, consider the **smallest bomb** that does;
+   - If you are leading a new trick (empty `topPlay`), shed more weak cards to shrink your hand count:
+     - prefer the small (see `Beating rules` below) legal non-bomb combinations;
+     - among similarly low-strength options, prefer combinations that use more cards
+   - If you must BEAT `topPlay`, make sure your play can BEAT it according to the `Beating rules`.
+     1. First find the **smallest same pattern** combination that still beats it;
+     2. If nothing of the same type beats it, consider the **smallest bomb** (Do NOT break bombs) that does;
      3. If a bomb is too costly and the situation is not critical, **`pass`**.
    - When legality is uncertain, prefer **`pass`**.
 
@@ -107,8 +107,10 @@ Decide based on `expect.kind`:
 
 - Goal: **both players on your partnership get out quickly**, not only racing to be first yourself.
 - When your **partner** (across from you) is clearly strong, take the lead less often and spend fewer bombs.
-- Use bombs to **intercept** opponents who are about to go out.
-- Do not spend high-value resources (joker bombs, large bombs, critical wilds) on non-critical tricks.
+- Do not spend high-value resources (4-jokers bomb, large bomb, critical wildcards) on non-critical tricks.
+  - Use bombs mainly to intercept opponents who are about to go out.
+- Breaking a larger pattern into smaller ones (e.g. splitting a `pair` into two `single`s, or a `plate` into two `triple`s) **weakens future strength**; only do this when necessary (e.g. no better legal follow/beat, strong pressure, or clear endgame need).
+  - Do NOT break bombs into weaker-bomb or non-bomb cards.
 
 ### Combination patterns (NOT beating order)
 - `single`: 1 card
