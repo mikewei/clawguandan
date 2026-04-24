@@ -22,6 +22,9 @@ use std::time::{Duration, Instant};
 
 use url::Url;
 
+#[path = "platform_process.rs"]
+mod platform_process;
+
 use clawguandan::bot::plugins::{
     BeatItPlugin, LlmBotParams, LlmBotPlugin, RuleBotPlugin, resolve_join_model,
     verify_script_model,
@@ -1267,68 +1270,38 @@ fn ping_pid_blocking(base: &str) -> Result<u32, String> {
     u32::try_from(n).map_err(|_| format!("invalid pid value {n}"))
 }
 
-#[cfg(unix)]
-fn unix_signal_process(pid: u32, sig: i32) -> Result<(), String> {
-    let rc = unsafe { libc::kill(pid as libc::pid_t, sig) };
-    if rc == 0 {
-        return Ok(());
-    }
-    let errno = unsafe { *libc::__errno_location() };
-    if errno == libc::ESRCH {
-        return Ok(());
-    }
-    Err(std::io::Error::from_raw_os_error(errno).to_string())
-}
-
-#[cfg(unix)]
-fn unix_pid_exited(pid: u32) -> bool {
-    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
-    if rc == 0 {
-        return false;
-    }
-    unsafe { *libc::__errno_location() == libc::ESRCH }
-}
-
 /// Stop whatever serves [`LOCAL_SERVER_PROBE_ADDR`]: GET `/ping` there for PID (ignores config).
 /// Success means `kill(pid, 0)` returns `ESRCH`.
 pub fn server_stop() -> Result<(), String> {
-    #[cfg(not(unix))]
-    {
-        return Err("server stop is only supported on Unix".into());
-    }
-    #[cfg(unix)]
-    {
-        let base = normalize_base(LOCAL_SERVER_PROBE_ADDR);
-        let pid = ping_pid_blocking(&base).map_err(|e| {
-            format!("cannot stop: no clawguandan server on {LOCAL_SERVER_PROBE_ADDR} ({e})")
-        })?;
+    let base = normalize_base(LOCAL_SERVER_PROBE_ADDR);
+    let pid = ping_pid_blocking(&base)
+        .map_err(|e| format!("cannot stop: no clawguandan server on {LOCAL_SERVER_PROBE_ADDR} ({e})"))?;
 
-        unix_signal_process(pid, libc::SIGTERM).map_err(|e| format!("SIGTERM: {e}"))?;
+    platform_process::signal_terminate(pid).map_err(|e| format!("terminate: {e}"))?;
 
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while std::time::Instant::now() < deadline {
-            if unix_pid_exited(pid) {
-                println!("stopped server (pid {pid})");
-                return Ok(());
-            }
-            thread::sleep(Duration::from_millis(50));
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        if platform_process::is_process_exited(pid) {
+            println!("stopped server (pid {pid})");
+            return Ok(());
         }
-
-        unix_signal_process(pid, libc::SIGKILL).map_err(|e| format!("SIGKILL: {e}"))?;
-
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while std::time::Instant::now() < deadline {
-            if unix_pid_exited(pid) {
-                println!("stopped server (pid {pid}) after SIGKILL");
-                return Ok(());
-            }
-            thread::sleep(Duration::from_millis(50));
-        }
-
-        Err(format!(
-            "server pid {pid} did not exit; check permissions or process state"
-        ))
+        thread::sleep(Duration::from_millis(50));
     }
+
+    platform_process::signal_force_kill(pid).map_err(|e| format!("force kill: {e}"))?;
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        if platform_process::is_process_exited(pid) {
+            println!("stopped server (pid {pid}) after force kill");
+            return Ok(());
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+
+    Err(format!(
+        "server pid {pid} did not exit; check permissions or process state"
+    ))
 }
 
 /// True when nothing answers on [`LOCAL_SERVER_PROBE_ADDR`] — failed `server_stop` is benign for `restart`.
@@ -2814,14 +2787,14 @@ fn default_script_path(kind: DefaultScriptKind) -> PathBuf {
 fn default_script_body(kind: DefaultScriptKind) -> &'static str {
     match kind {
         DefaultScriptKind::Openclaw => {
-            r#"#!/bin/bash
+            r#"#!/usr/bin/env bash
 
 PROMPT=$(cat)
 openclaw agent --message "$PROMPT" --local --session-id "ask_openclaw_$(date +%s)"
 "#
         }
         DefaultScriptKind::Hermes => {
-            r#"#!/bin/bash
+            r#"#!/usr/bin/env bash
 
 PROMPT=$(cat)
 hermes chat -q "$PROMPT" --quiet

@@ -2,6 +2,11 @@
 
 MVP 实现见 [doc/design.md](doc/design.md)：Axum HTTP API + `clawguandan` CLI，支持建桌、加入、准备、`nextstate` 长轮询与 `seq` 乐观锁。
 
+## 平台支持
+
+- 官方支持：Linux、macOS、Windows 上的 WSL2（Linux 用户态）。
+- Windows 原生命令行（PowerShell/CMD）不在支持范围内；请在 WSL2 中运行本项目命令。
+
 ## 运行服务端
 
 ```bash
