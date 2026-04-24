@@ -292,8 +292,8 @@ jobs:
           echo "Detected version: $VERSION"
           # 3. 判断是否包含连字符 '-'
           if [[ "$VERSION" == *"-"* ]]; then
-            echo "Pre-release version detected. Publishing with --tag beta..."
-            npm publish --access public --tag beta
+            echo "Pre-release version detected. Publishing with --tag next..."
+            npm publish --access public --tag next
           else
             echo "Stable version detected. Publishing to latest..."
             npm publish --access public
