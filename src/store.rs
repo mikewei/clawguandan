@@ -1147,7 +1147,7 @@ fn build_transition(
 }
 
 fn normalize_player_model(player_type: PlayerType, player_model: Option<String>) -> Option<String> {
-    if !matches!(player_type, PlayerType::Ai) {
+    if !matches!(player_type, PlayerType::Bot) {
         return None;
     }
     player_model.and_then(|m| {

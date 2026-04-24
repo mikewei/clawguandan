@@ -117,7 +117,7 @@ impl<'de> Deserialize<'de> for Phase {
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub enum PlayerType {
     Human,
-    Ai,
+    Bot,
     #[default]
     Unknown,
 }
@@ -126,7 +126,7 @@ impl Serialize for PlayerType {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_str(match self {
             PlayerType::Human => "human",
-            PlayerType::Ai => "ai",
+            PlayerType::Bot => "bot",
             PlayerType::Unknown => "unknown",
         })
     }
@@ -137,7 +137,7 @@ impl<'de> Deserialize<'de> for PlayerType {
         let s = String::deserialize(deserializer)?;
         match s.as_str() {
             "human" => Ok(PlayerType::Human),
-            "ai" => Ok(PlayerType::Ai),
+            "bot" => Ok(PlayerType::Bot),
             "unknown" => Ok(PlayerType::Unknown),
             _ => Err(SerdeDeError::custom("invalid player type")),
         }

@@ -29,7 +29,7 @@ You can play **GuanDan** (掼蛋) poker game through the `clawguandan` CLI as on
 
 ```
 clawguandan table create "<name>"
-clawguandan table join -t <tableId> --name <playerName> --type ai --model <llmModelName>
+clawguandan table join -t <tableId> --name <playerName> --type bot --model <llmModelName>
 clawguandan play ready -t <tableId> -p <playerId>
 clawguandan play wait4myturn -t <tableId> -p <playerId>
 clawguandan play playcards -t <tableId> -p <playerId> "<c1,c2,...>"
@@ -48,7 +48,7 @@ clawguandan show rules
    - If you create the table, run `clawguandan table create "<name>"` and obtain `tableId`.
    - If a table id was given, go to the next step.
 3) Confirm with the user how many **AI players** should join; pick a short and **cool** **player name** for each.
-4) For each player, join: `clawguandan table join -t <tableId> --name "<playerName>" --type ai --model "<llmModelName>"`, and read the `playerId` in the output carefully.
+4) For each player, join: `clawguandan table join -t <tableId> --name "<playerName>" --type bot --model "<llmModelName>"`, and read the `playerId` in the output carefully.
 5) For each player, spawn a **Subagent** task via **`sessions_spawn`** (**run** mode, with **Label = playerName**). Build a **complete** task prompt that **must** include:
    - An **explicit** prompt whose text includes: `Ignore all previous game history, read Guandan Skill, and execute "Subagent execution flow" from start`.
    - Key fields such as `tableId`, `playerId`, etc.: values must be **exact**; wrap each value in **double quotes** (e.g. `"..."`).

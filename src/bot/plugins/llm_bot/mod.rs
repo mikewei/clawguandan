@@ -6,6 +6,7 @@ mod parse;
 mod prompt;
 mod script;
 mod script_policy;
+mod self_check;
 
 use std::sync::Arc;
 
@@ -16,12 +17,14 @@ use crate::bot::policies::{ExchangePolicy, NamePolicy, PlayPolicy, TributePolicy
 
 use self::name_policy::LlmNamePolicy;
 use self::script_policy::LlmScriptPolicy;
+pub use self::self_check::{resolve_join_model, verify_script_model};
 
 #[derive(Clone, Debug)]
 pub struct LlmBotParams {
     pub script: std::path::PathBuf,
     pub timeout: Duration,
     pub name_bots: bool,
+    pub model: Option<String>,
     /// CLI verbosity count (`-v`, `-vv`, ...).
     pub verbosity: u8,
 }
@@ -63,5 +66,9 @@ impl BotPlugin for LlmBotPlugin {
 
     fn name_policy(&self) -> Arc<dyn NamePolicy> {
         self.name.clone() as Arc<dyn NamePolicy>
+    }
+
+    fn join_player_model(&self) -> Option<String> {
+        self.script.params.model.clone()
     }
 }

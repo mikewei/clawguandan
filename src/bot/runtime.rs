@@ -164,6 +164,7 @@ pub fn run_bot_subprocess(
             .or_else(|| create_v["table_id"].as_str())
             .ok_or_else(|| "create: missing tableId".to_string())?
             .to_string();
+        println!("[{plugin_id}][I][table:created] table={tid}");
         if show_cli_stderr {
             let stderr = String::from_utf8_lossy(&out.stderr);
             if !stderr.trim().is_empty() {
@@ -253,6 +254,7 @@ pub fn run_bot_subprocess(
             _ => default_display_names_for_plugin(&plugin_id, target_join),
         };
 
+    let join_model = plugin.join_player_model();
     let mut pids: Vec<String> = Vec::new();
     for i in 0..target_join {
         let label = format!("table join bot{i}");
@@ -260,16 +262,7 @@ pub fn run_bot_subprocess(
             .get(i)
             .cloned()
             .unwrap_or_else(|| format!("bot{i}"));
-        let args = vec![
-            "table".to_string(),
-            "join".to_string(),
-            "-t".to_string(),
-            table_id.clone(),
-            "--name".to_string(),
-            bot_name,
-            "--seat".to_string(),
-            "auto".to_string(),
-        ];
+        let args = build_join_args(&table_id, &bot_name, join_model.as_deref());
         if show_cli_io {
             log_cli_call(&plugin_id, &label, &args);
         }
@@ -289,6 +282,10 @@ pub fn run_bot_subprocess(
             .as_str()
             .ok_or_else(|| "join: missing playerId".to_string())?
             .to_string();
+        println!(
+            "[{plugin_id}][I][table:joined] table={} player={} name={}",
+            table_id, pid, bot_name
+        );
         pids.push(pid);
     }
     for (i, pid) in pids.iter().enumerate() {
@@ -659,6 +656,38 @@ pub fn run_bot_subprocess(
                     show_cli_stderr_bot,
                 );
                 if let Err(e) = run_result {
+                    let can_fallback = decision_is_suggest_fallback_eligible(&decision);
+                    let illegal_action = cli_error_has_code(&e, "ILLEGAL_ACTION");
+                    if can_fallback && illegal_action {
+                        if show_summary_bot {
+                            let attempted = match &decision {
+                                BotDecision::Action(action) => player_action_summary(action),
+                                _ => "n/a".to_string(),
+                            };
+                            println!(
+                                "[{plugin_id_bot}][I][player:fallback] player={} table={} fallback=policy_to_suggest reason=ILLEGAL_ACTION attempted={}",
+                                player_label_bot, table_id_bot, attempted
+                            );
+                        }
+                        if let Err(e2) = run_decision_action(
+                            &bin_bot,
+                            &table_id_bot,
+                            &pid,
+                            &player_label_bot,
+                            &BotDecision::UseSuggest,
+                            &actor_label,
+                            &plugin_id_bot,
+                            show_summary_bot,
+                            show_cli_io_bot,
+                            show_cli_stderr_bot,
+                        ) {
+                            shared_bot.fail(format!(
+                                "{actor_label}: fallback suggest after ILLEGAL_ACTION failed: {e2}"
+                            ));
+                            break;
+                        }
+                        continue;
+                    }
                     shared_bot.fail(e);
                     break;
                 }
@@ -683,6 +712,43 @@ pub fn run_bot_subprocess(
         );
     }
     Ok(())
+}
+
+fn build_join_args(table_id: &str, bot_name: &str, model: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "table".to_string(),
+        "join".to_string(),
+        "-t".to_string(),
+        table_id.to_string(),
+        "--name".to_string(),
+        bot_name.to_string(),
+        "--type".to_string(),
+        "bot".to_string(),
+        "--seat".to_string(),
+        "auto".to_string(),
+    ];
+    if let Some(m) = model {
+        args.push("--model".to_string());
+        args.push(m.to_string());
+    }
+    args
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_join_args;
+
+    #[test]
+    fn join_args_always_include_bot_type() {
+        let args = build_join_args("t1", "bot0", None);
+        assert!(args.windows(2).any(|w| w == ["--type", "bot"]));
+    }
+
+    #[test]
+    fn join_args_include_model_when_present() {
+        let args = build_join_args("t1", "bot0", Some("gpt-5"));
+        assert!(args.windows(2).any(|w| w == ["--model", "gpt-5"]));
+    }
 }
 
 fn run_decision_action(
@@ -896,6 +962,34 @@ fn nextstate_stdout_is_no_content(stdout: &[u8]) -> bool {
 
 fn cli_error_is_wait4myturn_timeout(msg: &str) -> bool {
     msg.contains("wait4myturn timeout after")
+}
+
+fn cli_error_has_code(msg: &str, code: &str) -> bool {
+    if let (Some(start), Some(end)) = (msg.find('{'), msg.rfind('}'))
+        && start < end
+        && let Ok(v) = serde_json::from_str::<Value>(&msg[start..=end])
+    {
+        let parsed = v
+            .get("error")
+            .and_then(|e| e.get("code"))
+            .and_then(|c| c.as_str());
+        if parsed == Some(code) {
+            return true;
+        }
+    }
+    msg.contains(code)
+}
+
+fn decision_is_suggest_fallback_eligible(decision: &BotDecision) -> bool {
+    matches!(
+        decision,
+        BotDecision::Action(
+            PlayerAction::Pass
+                | PlayerAction::Tribute { .. }
+                | PlayerAction::ReturnCard { .. }
+                | PlayerAction::Play { .. }
+        )
+    )
 }
 
 fn transition_counts_as_hand_done(v: &Value) -> bool {

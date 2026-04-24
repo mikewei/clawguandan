@@ -339,7 +339,7 @@ async fn create_join_ready_game_started_flow() {
 }
 
 #[tokio::test]
-async fn join_player_model_only_effective_for_ai() {
+async fn join_player_model_only_effective_for_bot() {
     let app = app_with_store(TableStore::new());
 
     let res = app
@@ -357,7 +357,7 @@ async fn join_player_model_only_effective_for_ai() {
     let v = read_json(res).await;
     let table_id = v["tableId"].as_str().unwrap().to_string();
 
-    let ai_join = app
+    let bot_join = app
         .clone()
         .oneshot(
             Request::builder()
@@ -366,8 +366,8 @@ async fn join_player_model_only_effective_for_ai() {
                 .header("content-type", "application/json")
                 .body(Body::from(
                     json!({
-                        "playerName": "AI-E",
-                        "playerType": "ai",
+                        "playerName": "Bot-E",
+                        "playerType": "bot",
                         "playerModel": "  gpt-4o  ",
                         "seat": "E",
                     })
@@ -377,10 +377,10 @@ async fn join_player_model_only_effective_for_ai() {
         )
         .await
         .unwrap();
-    assert_eq!(ai_join.status(), StatusCode::OK);
-    let ai_body = read_json(ai_join).await;
-    assert_eq!(ai_body["playerType"], "ai");
-    assert_eq!(ai_body["playerModel"], "gpt-4o");
+    assert_eq!(bot_join.status(), StatusCode::OK);
+    let bot_body = read_json(bot_join).await;
+    assert_eq!(bot_body["playerType"], "bot");
+    assert_eq!(bot_body["playerModel"], "gpt-4o");
 
     let human_join = app
         .clone()
@@ -448,7 +448,7 @@ async fn join_player_model_only_effective_for_ai() {
 }
 
 #[tokio::test]
-async fn join_ai_with_blank_model_normalizes_to_none() {
+async fn join_bot_with_blank_model_normalizes_to_none() {
     let app = app_with_store(TableStore::new());
 
     let res = app
@@ -475,8 +475,8 @@ async fn join_ai_with_blank_model_normalizes_to_none() {
                 .header("content-type", "application/json")
                 .body(Body::from(
                     json!({
-                        "playerName": "AI-E",
-                        "playerType": "ai",
+                        "playerName": "Bot-E",
+                        "playerType": "bot",
                         "playerModel": "   ",
                         "seat": "E",
                     })

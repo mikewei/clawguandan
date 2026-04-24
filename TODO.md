@@ -1,6 +1,7 @@
 # TODO List
 
+- update skill.md
 - SKILL安装依赖
-- add llm-bot
-- add model icon
 - improve cli help
+- table cards refresh when play problem
+- add model icon

@@ -29,8 +29,8 @@ fn last_marker(stdout: &str) -> Option<String> {
 
 /// Run `script` with `prompt` on stdin; return combined stdout (lossy UTF-8) or error.
 ///
-/// At `-v`, prints key invocation lifecycle logs.
-/// At `-vv` and above, also prints prompt/stdout/stderr details.
+/// At `-v`, prints invocation lifecycle logs and **full script stdout** (model “thinking”).
+/// At `-vv` and above, also prints the full stdin prompt and stderr.
 pub fn run_script_with_timeout(
     script: &Path,
     prompt: &str,
@@ -111,14 +111,14 @@ pub fn run_script_with_timeout(
             stderr.len(),
             marker
         );
-    }
-    if verbosity >= 2 {
         println!(
-            "{log_prefix} stdout bytes={} elapsed_ms={}:\n{}",
+            "{log_prefix} stdout_full bytes={} elapsed_ms={}:\n{}",
             stdout.len(),
             elapsed_ms,
             stdout
         );
+    }
+    if verbosity >= 2 {
         if !stderr.trim().is_empty() {
             println!(
                 "{log_prefix} stderr:\n{}",

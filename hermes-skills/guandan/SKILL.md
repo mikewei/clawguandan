@@ -28,7 +28,7 @@ You can play **GuanDan** (掼蛋) poker game through the `clawguandan` CLI as on
 
 ```
 clawguandan table create "<name>"
-clawguandan table join -t <tableId> --name <playerName> --type ai --model <llmModelName>
+clawguandan table join -t <tableId> --name <playerName> --type bot --model <llmModelName>
 clawguandan play ready -t <tableId> -p <playerId>
 clawguandan play wait4myturn -t <tableId> -p <playerId>
 clawguandan play playcards -t <tableId> -p <playerId> "<c1,c2,...>"
@@ -46,7 +46,7 @@ clawguandan show rules
    - If you create the table, run `clawguandan table create "<name>"` and obtain `tableId`.
 2) Confirm how many **AI players** to be joined (up to 3 allowed in one session due to the hermes subagent limit), for each AI player:
    - pick a short and **cool** **player name**.
-   - run: `clawguandan table join -t <tableId> --name "<playerName>" --type ai --model "<llmModelName>"`, and capture the `playerId` in the output carefully.
+   - run: `clawguandan table join -t <tableId> --name "<playerName>" --type bot --model "<llmModelName>"`, and capture the `playerId` in the output carefully.
    - **CRITICAL**: Do NOT spawn any subagents yet. 
    - Keep a list of `[ {playerName: "...", playerId: "..."} ]`.
 3) Once ALL players have been joined and their `playerIds` are recorded, spawn **subagents** in batch mode:

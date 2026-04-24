@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Read, Write};
 use std::net::IpAddr;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -23,7 +22,10 @@ use std::time::{Duration, Instant};
 
 use url::Url;
 
-use clawguandan::bot::plugins::{BeatItPlugin, LlmBotParams, LlmBotPlugin, RuleBotPlugin};
+use clawguandan::bot::plugins::{
+    BeatItPlugin, LlmBotParams, LlmBotPlugin, RuleBotPlugin, resolve_join_model,
+    verify_script_model,
+};
 use clawguandan::bot::{BotRunOptions, run_bot_subprocess};
 use clawguandan::domain::{
     NextStateBody, PrivateView, TableState, TableStatus, apply_transition_delta_to_table_state,
@@ -625,7 +627,7 @@ pub(crate) enum BotCmd {
         /// Number of hands to complete (each ends in scoring). If omitted, runs until game end.
         #[arg(long)]
         hands: Option<u32>,
-        /// Increase log verbosity (`-v` summary, `-vv` subprocess stdout, `-vvv` +stderr/raw transition)
+        /// Increase log verbosity (`-v` summary + full script stdout, `-vv` + stdin prompt/script stderr, `-vvv` +raw transition)
         #[arg(short = 'v', long = "verbose", action = ArgAction::Count)]
         verbosity: u8,
         /// Path to user script: read UTF-8 prompt from stdin, write markers to stdout.
@@ -637,9 +639,12 @@ pub(crate) enum BotCmd {
         /// Wall-clock timeout per script invocation in milliseconds (default: 120000).
         #[arg(long)]
         llm_timeout_ms: Option<u64>,
-        /// Before join, call script once to parse `<<<NAMING:LIST|...>>>` for bot display names.
+        /// Before join, call script once to parse `<<<NAMING:LIST|...>>>` for bot display names (default: on; pass `false` to disable).
+        #[arg(long, num_args = 0..=1, default_missing_value = "true", value_parser = clap::value_parser!(bool))]
+        llm_name_bots: Option<bool>,
+        /// LLM model name for bot joins (`table join --type bot --model ...`).
         #[arg(long)]
-        llm_name_bots: bool,
+        model: Option<String>,
     },
 }
 
@@ -704,7 +709,7 @@ pub(crate) enum TableCmd {
         name: String,
         #[arg(long)]
         r#type: Option<String>,
-        /// AI model name. Effective only when `--type ai`.
+        /// LLM model name. Effective only when `--type bot` (robot player).
         #[arg(long)]
         model: Option<String>,
         #[arg(long, default_value = "auto")]
@@ -956,6 +961,7 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 default_script,
                 llm_timeout_ms,
                 llm_name_bots,
+                model,
             } => simulate_llm_subprocess(
                 table,
                 rank,
@@ -965,7 +971,8 @@ pub fn run_from_top(command: Top) -> Result<(), String> {
                 script,
                 default_script,
                 llm_timeout_ms,
-                llm_name_bots,
+                llm_name_bots.unwrap_or(true),
+                model,
             ),
         },
         Top::Show { cmd } => match cmd {
@@ -1347,7 +1354,7 @@ fn parse_player_type(s: Option<String>) -> Result<Option<String>, String> {
     Ok(match s.as_deref() {
         None | Some("") => None,
         Some("human") => Some("human".into()),
-        Some("ai") => Some("ai".into()),
+        Some("bot") => Some("bot".into()),
         Some("unknown") => Some("unknown".into()),
         Some(x) => return Err(format!("invalid player type {:?}", x)),
     })
@@ -2595,12 +2602,19 @@ fn simulate_llm_subprocess(
     default_script: Option<DefaultScriptKind>,
     llm_timeout_ms: Option<u64>,
     llm_name_bots: bool,
+    model: Option<String>,
 ) -> Result<(), String> {
     let timeout_ms = llm_timeout_ms.unwrap_or(120_000);
     let resolved = resolve_llm_script(script, default_script)?;
     println!("[llm-bot] script:init {}", resolved.init_message);
-    if resolved.is_default_script {
-        verify_default_script_marker(&resolved.path, Duration::from_millis(timeout_ms))?;
+    let detected_model = verify_llm_script_model(
+        &resolved.path,
+        Duration::from_millis(timeout_ms),
+        resolved.is_default_script,
+    )?;
+    let resolved_model = resolve_join_model(model, detected_model);
+    if let Some(ref m) = resolved_model {
+        println!("[llm-bot] script:model {}", m);
     }
     run_bot_subprocess(
         BotRunOptions {
@@ -2614,6 +2628,7 @@ fn simulate_llm_subprocess(
             script: resolved.path,
             timeout: Duration::from_millis(timeout_ms),
             name_bots: llm_name_bots,
+            model: resolved_model,
             verbosity,
         })),
     )
@@ -2663,7 +2678,7 @@ fn default_script_body(kind: DefaultScriptKind) -> &'static str {
             r#"#!/bin/bash
 
 PROMPT=$(cat)
-openclaw agent --message "$PROMPT" --local --agent main
+openclaw agent --message "$PROMPT" --local --session-id "ask_openclaw_$(date +%s)"
 "#
         }
         DefaultScriptKind::Hermes => {
@@ -2706,78 +2721,33 @@ fn ensure_executable(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn verify_default_script_marker(script: &Path, timeout: Duration) -> Result<(), String> {
-    const EXPECTED_MARKER: &str = "<<<DECISION:PASS>>>";
-    let prompt = format!(
-        "Smoke test. Reply exactly with this one-line marker and nothing else:\n{EXPECTED_MARKER}\n"
-    );
-    let out = match run_script_for_check(script, &prompt, timeout) {
-        Ok(s) => s,
+/// Self-check: stdin prompt asks for `<<<MODEL:name>>>`, used for both `--script` and `--default-script`.
+fn verify_llm_script_model(
+    script: &Path,
+    timeout: Duration,
+    is_default_script: bool,
+) -> Result<String, String> {
+    match verify_script_model(script, timeout) {
+        Ok(model) => Ok(model),
         Err(e) => {
-            eprintln!("[llm-bot] default script self-check error: {e}");
-            return Err(format!(
-                "The default script is not working, please fix it and rerun or use another script via --script. The default script file is at {}",
-                script.display()
-            ));
+            eprintln!("[llm-bot] script self-check error: {e}");
+            Err(llm_script_self_check_failure_message(is_default_script, script))
         }
-    };
-    if out.contains(EXPECTED_MARKER) {
-        return Ok(());
     }
-    eprintln!(
-        "[llm-bot] default script self-check error: expected marker {EXPECTED_MARKER}, got stdout={:?}",
-        out.trim()
-    );
-    Err(format!(
-        "The default script is not working, please fix it and rerun or use another script via --script. The default script file is at {}",
-        script.display()
-    ))
 }
 
-fn run_script_for_check(script: &Path, prompt: &str, timeout: Duration) -> Result<String, String> {
-    let mut child = Command::new(script)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("spawn {:?}: {e}", script))?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(prompt.as_bytes())
-            .map_err(|e| format!("stdin: {e}"))?;
+fn llm_script_self_check_failure_message(is_default_script: bool, script: &Path) -> String {
+    if is_default_script {
+        format!(
+            "The default script is not working, please fix it and rerun or use another script via --script. The default script file is at {}",
+            script.display()
+        )
+    } else {
+        format!(
+            "The script passed via --script is not working; fix the script or choose another path. Script path: {}",
+            script.display()
+        )
     }
-
-    let deadline = std::time::Instant::now() + timeout;
-    let status = loop {
-        if std::time::Instant::now() > deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("timeout".into());
-        }
-        match child.try_wait().map_err(|e| e.to_string())? {
-            None => std::thread::sleep(Duration::from_millis(25)),
-            Some(s) => break s,
-        }
-    };
-
-    let mut stdout_buf = Vec::new();
-    if let Some(mut out) = child.stdout.take() {
-        let _ = out.read_to_end(&mut stdout_buf);
-    }
-    let mut stderr_buf = Vec::new();
-    if let Some(mut err) = child.stderr.take() {
-        let _ = err.read_to_end(&mut stderr_buf);
-    }
-    let stderr = String::from_utf8_lossy(&stderr_buf).into_owned();
-    if !status.success() {
-        return Err(format!(
-            "script exit {:?}: stderr={}",
-            status.code(),
-            stderr.trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&stdout_buf).into_owned())
 }
 
 #[cfg(test)]

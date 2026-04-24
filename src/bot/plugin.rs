@@ -54,4 +54,9 @@ pub trait BotPlugin: Send + Sync {
     fn observer_policy(&self) -> Arc<dyn crate::bot::policies::ObserverPolicy> {
         crate::bot::policies::default_observer()
     }
+
+    /// Optional join-time `playerModel` to pass into `table join --model`.
+    fn join_player_model(&self) -> Option<String> {
+        None
+    }
 }

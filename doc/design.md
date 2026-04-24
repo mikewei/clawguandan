@@ -207,7 +207,7 @@ Base path: `/api/v1`
   "phase": "table_setup|dealing|tribute|exchange|playing|scoring|completed",
   "seats": {
     "E": { "playerId": "p1", "playerName": "Alice", "playerType": "human", "ready": true, "remainingCount": 12 },
-    "S": { "playerId": "p2", "playerName": "Bot-S", "playerType": "ai", "ready": true, "remainingCount": 8 },
+    "S": { "playerId": "p2", "playerName": "Bot-S", "playerType": "bot", "ready": true, "remainingCount": 8 },
     "W": { "playerId": "p3", "playerName": "Bob", "playerType": "unknown", "ready": true, "remainingCount": 16 },
     "N": { "playerId": null, "playerName": null, "playerType": null, "ready": false, "remainingCount": null }
   },
@@ -400,10 +400,10 @@ Optional convenience:
   - Body: optional table config (for example `{}`).
   - Response: `{ "tableId", "seq": 0, "status": "waiting" }`
 - `POST /tables/{tableId}/join`
-  - Body: `{ "playerType": "human|ai|unknown", "playerName": "...", "seat": "E|S|W|N|auto" }`
+  - Body: `{ "playerType": "human|bot|unknown", "playerName": "...", "seat": "E|S|W|N|auto" }`
   - `playerType` is optional; when omitted, the server defaults it to `unknown`.
   - Response includes server-issued player identity and current head, for example:
-    - `{ "playerId": "...", "playerKey": "<uuid>", "seat": "S", "playerType": "ai", "newSeq": 1 }`
+    - `{ "playerId": "...", "playerKey": "<uuid>", "seat": "S", "playerType": "bot", "newSeq": 1 }`
   - On success: advances `seq`, append transition.
 - `POST /tables/{tableId}/ready`
   - Body: `{ "playerId", "playerKey", "ready": true|false }` (no `seq`; the server applies against the current head).
@@ -447,7 +447,7 @@ High-level flow:
 1. **Create or join** a table; remember `tableId`, `playerId`, and `playerKey`:
    - Point the CLI at a server: `clawguandan server use <hostOrIp[:port]>` or `clawguandan server new`.
    - **Create:** `clawguandan table create [<tableName>]` ; The command prints JSON; read and store `tableId`.
-   - **Join:** `clawguandan table join -t <tableId> --name "<playerName>" --type ai [--seat E|S|W|N|auto]`.
+   - **Join:** `clawguandan table join -t <tableId> --name "<playerName>" --type bot [--seat E|S|W|N|auto]`.
 2. **Ready:** `clawguandan play ready -t <tableId> -p <playerId>` ; CLI auto-loads `playerKey` from local auth session unless `-k/--player-key` is passed explicitly.
 3. **Until the game is over**, repeat:
    - Run `clawguandan play wait4myturn -t <tableId> -p <playerId>` and **read stdout** (local full state / prompt materialized for this player).
@@ -502,12 +502,12 @@ CLI commands are optional adapters over the Web API, for local testing and bot i
 - `clawguandan table create <tableName>`
   - Create a new table.
   - Example: `clawguandan table create "Friday Night #1"`
-- `clawguandan table join -t <tableId> --name <playerName> [--type human|ai|unknown] [--seat E|S|W|N|auto] [--no-sync]`
+- `clawguandan table join -t <tableId> --name <playerName> [--type human|bot|unknown] [--seat E|S|W|N|auto] [--no-sync]`
   - Join a table and receive server-issued `playerId` + `playerKey`.
   - CLI writes `playerKey` to `<sessionDir>/auth.json` immediately (even with `--no-sync`).
   - By default, after a successful join the CLI runs an internal catch-up (`table sync`) and prints the **local full materialized state** (see `session.json` below). Use `--no-sync` to print only the join API JSON (for scripts).
   - `--type` defaults to `unknown`; `--seat` defaults to `auto`.
-  - Example: `clawguandan table join -t t_100 --name "Bot-S" --type ai --seat auto`
+  - Example: `clawguandan table join -t t_100 --name "Bot-S" --type bot --seat auto`
 - `clawguandan table nextstate -t <tableId> [-p <playerId>] [-k <playerKey>] [--seq <seq>] [--observer-name <name>]` (`--observer-name` is mutually exclusive with `-p`)
   - Long-poll for exactly one next transition (`sinceSeq + 1`).
   - Default stdout is the server JSON (includes `lag`).

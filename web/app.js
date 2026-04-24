@@ -12,6 +12,20 @@ const HAND_GROUP_CHAIN_MS = 250;
 const ID_HOVERCARD_HIDE_DELAY_MS = 120;
 const SVG_CARDS_SPRITE_PATH = "/cards/svg-cards/svg-cards.svg";
 const SVG_CARD_VIEWBOX = "0 0 169.075 244.64";
+const PLAYER_ICON_BASE = "/icons/";
+const MODEL_ICON_KEYWORDS = [
+  "chatgpt",
+  "claude",
+  "deepseek",
+  "gemini",
+  "grok",
+  "kimi",
+  "mimo",
+  "minimax",
+  "qwen",
+  // Keep short token last to reduce accidental matches.
+  "hy",
+];
 const SESSION_MODE_PLAYER = "player";
 const SESSION_MODE_OBSERVER = "observer";
 const CREATE_RANK_OPTIONS = new Set([
@@ -312,7 +326,7 @@ function showIdHovercard(anchor, kind, idValue, options = {}) {
     ? { x: options.point.x, y: options.point.y }
     : null;
   idHovercardLabel.textContent = kind;
-  idHovercardValue.textContent = `Id: ${value}`;
+  idHovercardValue.textContent = options.rawText ? value : `Id: ${value}`;
   idHovercardRoot.classList.remove("hidden");
   idHovercardRoot.setAttribute("aria-hidden", "false");
   positionIdHovercard(anchor);
@@ -361,6 +375,61 @@ function bindIdHovercardTrigger(node, kind, idValue) {
     showIdHovercard(node, hoverKind, hoverValue, {
       pinned: true,
       point: { x: ev.clientX, y: ev.clientY },
+    });
+  });
+}
+
+function bindAvatarMetaHovercardTrigger(node, info) {
+  if (!node) return;
+  const rawType = String(info?.playerType || "unknown").toLowerCase().trim() || "unknown";
+  const playerTypeKey = rawType === "human"
+    ? "avatarPlayerTypeHuman"
+    : rawType === "bot"
+      ? "avatarPlayerTypeBot"
+      : "avatarPlayerTypeUnknown";
+  const playerType = t(playerTypeKey);
+  const rawModel = String(info?.playerModel || "").trim();
+  const playerModel = rawModel || t("avatarMetaModelNone");
+  const hoverValue = tf("avatarMetaLine", {
+    typeLabel: t("avatarMetaTypeLabel"),
+    playerType,
+    modelLabel: t("avatarMetaModelLabel"),
+    playerModel,
+  });
+  node.classList.add("id-hover-trigger");
+  node.dataset.avatarHoverValue = hoverValue;
+  if (node.dataset.avatarHoverBound === "1") return;
+  node.dataset.avatarHoverBound = "1";
+  node.addEventListener("mouseenter", (ev) => {
+    if (isTouchPointerMode()) return;
+    const value = String(node.dataset.avatarHoverValue || "").trim();
+    if (!value) return;
+    showIdHovercard(node, "player", value, {
+      pinned: false,
+      point: { x: ev.clientX, y: ev.clientY },
+      rawText: true,
+    });
+  });
+  node.addEventListener("mouseleave", () => {
+    if (isTouchPointerMode()) return;
+    scheduleIdHovercardHide();
+  });
+  node.addEventListener("click", (ev) => {
+    const value = String(node.dataset.avatarHoverValue || "").trim();
+    if (!value) return;
+    if (!isTouchPointerMode()) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    const rootVisible = idHovercardRoot && !idHovercardRoot.classList.contains("hidden");
+    const sameAnchor = idHovercardAnchor === node;
+    if (rootVisible && sameAnchor && idHovercardPinned) {
+      hideIdHovercard();
+      return;
+    }
+    showIdHovercard(node, "player", value, {
+      pinned: true,
+      point: { x: ev.clientX, y: ev.clientY },
+      rawText: true,
     });
   });
 }
@@ -1323,6 +1392,31 @@ function playerNameText(info) {
   return info.playerName || t("seatAnonymous");
 }
 
+/** @param {Record<string, unknown> | null | undefined} info */
+function playerAvatarFile(info) {
+  const pt = String(info?.playerType || "").toLowerCase().trim();
+  if (pt === "human") return "human.png";
+  if (pt === "bot") {
+    const model = String(info?.playerModel || "").trim();
+    if (!model.length) return "bot.png";
+    const modelLower = model.toLowerCase();
+    const keywordHit = MODEL_ICON_KEYWORDS.find((k) => modelLower.includes(k));
+    return keywordHit ? `${keywordHit}.png` : "llm.png";
+  }
+  return "unknown.png";
+}
+
+/** @param {Record<string, unknown> | null | undefined} info @param {{ size: "seat" | "feed" }} opts */
+function createPlayerAvatarEl(info, opts) {
+  const img = document.createElement("img");
+  img.className = `player-avatar player-avatar--${opts.size}`;
+  img.src = `${PLAYER_ICON_BASE}${playerAvatarFile(info)}`;
+  bindAvatarMetaHovercardTrigger(img, info);
+  img.alt = "";
+  img.setAttribute("aria-hidden", "true");
+  return img;
+}
+
 function actorDisplayText(table) {
   const actorId = getPrimaryExpectActorId(state.expect);
   if (!actorId) return t("turnUnknown");
@@ -1423,6 +1517,7 @@ function buildTrickFeedPlayerCard(table, seat, mySeat) {
   if (seat === mySeat) {
     card.classList.add("is-self");
   }
+  card.appendChild(createPlayerAvatarEl(info, { size: "feed" }));
   const name = document.createElement("div");
   name.className = "trick-feed-player-name";
   name.textContent = playerNameText(info);
@@ -1630,12 +1725,16 @@ function buildSeatCard(table, seat, info, actorPlayerIds, mySeat, finishRankBySe
 
   const title = document.createElement("div");
   title.className = "seat-title";
-  title.textContent = playerNameText(info);
-  bindIdHovercardTrigger(title, "playerId", info?.playerId || "");
+  title.appendChild(createPlayerAvatarEl(info, { size: "seat" }));
+  const nameWrap = document.createElement("span");
+  nameWrap.className = "seat-title-name";
+  nameWrap.textContent = playerNameText(info);
+  bindIdHovercardTrigger(nameWrap, "playerId", info?.playerId || "");
   const isAway = String(info?.presence || "").toLowerCase() === "away";
   const dot = document.createElement("span");
   dot.className = `seat-ready-dot ${isAway ? "away" : info.ready ? "ready" : ""}`;
-  title.appendChild(dot);
+  nameWrap.appendChild(dot);
+  title.appendChild(nameWrap);
   item.appendChild(title);
 
   const meta = document.createElement("div");

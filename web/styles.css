@@ -789,20 +789,25 @@ button:disabled {
 
 .trick-feed-player {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   width: 88px;
   flex: 0 0 88px;
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 10px;
-  padding: 14px 6px 6px;
+  padding: 10px 6px 6px;
   background: rgba(7, 23, 18, 0.65);
 }
 
 .trick-feed-player-name {
+  width: 100%;
   font-size: 0.76rem;
   font-weight: 700;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-align: center;
 }
 
 .trick-feed-player.is-self .trick-feed-player-name {
@@ -1028,9 +1033,40 @@ button:disabled {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 4px;
+  gap: 3px;
+  min-width: 0;
   font-size: 0.86rem;
   font-weight: 700;
+}
+
+.seat-title-name {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-avatar {
+  display: block;
+  flex-shrink: 0;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.player-avatar--seat {
+  width: 32px;
+  height: 32px;
+}
+
+.player-avatar--feed {
+  width: 32px;
+  height: 32px;
+  margin: 0 auto 4px;
 }
 
 .seat-box.is-self .seat-title {
@@ -1638,9 +1674,17 @@ button:disabled {
 
   .portrait-seat-grid .seat-box .seat-title {
     font-size: 0.78rem;
+  }
+
+  .portrait-seat-grid .seat-box .seat-title-name {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .portrait-seat-grid .seat-box .player-avatar--seat {
+    width: 22px;
+    height: 22px;
   }
 
   .portrait-seat-grid .seat-box .seat-meta {
@@ -1715,6 +1759,11 @@ button:disabled {
     flex-basis: 78px;
   }
 
+  .table-stage.is-feed-mode .trick-feed-player .player-avatar--feed {
+    width: 28px;
+    height: 28px;
+  }
+
   .table-stage.is-feed-mode .trick-feed-bubble {
     max-width: min(68vw, 320px);
   }
@@ -1768,6 +1817,12 @@ button:disabled {
 
   .portrait-seat-grid .seat-box .seat-title {
     font-size: 0.74rem;
+    gap: 4px;
+  }
+
+  .portrait-seat-grid .seat-box .player-avatar--seat {
+    width: 20px;
+    height: 20px;
   }
 
   .portrait-seat-grid .seat-box .seat-meta {

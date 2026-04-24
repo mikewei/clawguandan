@@ -110,6 +110,36 @@ pub fn parse_decision_stdout(stdout: &str) -> ParsedStdoutDecision {
     }
 }
 
+/// Parse a JSON object payload; if strict parse fails, retry with narrow `{` / `}` repairs
+/// (common when the model drops the closing `}` before the `>>>` marker).
+fn parse_decision_json_value(payload: &str) -> Result<Value, String> {
+    let t = payload.trim();
+    if t.is_empty() {
+        return Err("empty JSON payload".into());
+    }
+
+    let mut candidates: Vec<String> = Vec::new();
+    candidates.push(t.to_string());
+    if t.starts_with('{') && !t.ends_with('}') {
+        candidates.push(format!("{t}}}"));
+    }
+    if !t.starts_with('{') && t.ends_with('}') {
+        let mut s = String::with_capacity(t.len() + 1);
+        s.push('{');
+        s.push_str(t);
+        candidates.push(s);
+    }
+
+    let mut last_err = String::new();
+    for s in candidates {
+        match serde_json::from_str::<Value>(&s) {
+            Ok(v) => return Ok(v),
+            Err(e) => last_err = e.to_string(),
+        }
+    }
+    Err(last_err)
+}
+
 fn parse_decision_body(kind_raw: &str, payload: &str) -> ParsedStdoutDecision {
     let kind = kind_raw.trim();
     let kind_upper: String = kind.to_ascii_uppercase();
@@ -132,21 +162,21 @@ fn parse_decision_body(kind_raw: &str, payload: &str) -> ParsedStdoutDecision {
             }
             ParsedStdoutDecision::UseSuggest
         }
-        "PLAY" => match serde_json::from_str::<Value>(payload.trim()) {
+        "PLAY" => match parse_decision_json_value(payload) {
             Ok(v) => match PlayerAction::try_from_action_type_payload("play", &v) {
                 Ok(a) => ParsedStdoutDecision::Action(a),
                 Err(e) => ParsedStdoutDecision::Malformed(format!("PLAY: {e}")),
             },
             Err(e) => ParsedStdoutDecision::Malformed(format!("PLAY JSON: {e}")),
         },
-        "TRIBUTE" => match serde_json::from_str::<Value>(payload.trim()) {
+        "TRIBUTE" => match parse_decision_json_value(payload) {
             Ok(v) => match PlayerAction::try_from_action_type_payload("tribute", &v) {
                 Ok(a) => ParsedStdoutDecision::Action(a),
                 Err(e) => ParsedStdoutDecision::Malformed(format!("TRIBUTE: {e}")),
             },
             Err(e) => ParsedStdoutDecision::Malformed(format!("TRIBUTE JSON: {e}")),
         },
-        "RETURN-CARD" | "RETURN_CARD" => match serde_json::from_str::<Value>(payload.trim()) {
+        "RETURN-CARD" | "RETURN_CARD" => match parse_decision_json_value(payload) {
             Ok(v) => match PlayerAction::try_from_action_type_payload("return_card", &v) {
                 Ok(a) => ParsedStdoutDecision::Action(a),
                 Err(e) => ParsedStdoutDecision::Malformed(format!("RETURN-CARD: {e}")),
@@ -313,6 +343,16 @@ mod tests {
     #[test]
     fn decision_play_json() {
         let s = r##"<<<DECISION:PLAY|{"cards":["♠3"]}>>>"##;
+        let p = parse_decision_stdout(s);
+        assert!(matches!(
+            p,
+            ParsedStdoutDecision::Action(PlayerAction::Play { .. })
+        ));
+    }
+
+    #[test]
+    fn decision_play_json_missing_closing_brace() {
+        let s = r##"<<<DECISION:PLAY|{"cards":["♣Q"]>>>"##;
         let p = parse_decision_stdout(s);
         assert!(matches!(
             p,
