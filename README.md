@@ -1,52 +1,61 @@
-# clawguandan
+<p align="center">
+  <img src="web/images/clawguandan.png" alt="clawguandan Logo" width="128" />
+</p>
 
-MVP 实现见 [doc/design.md](doc/design.md)：Axum HTTP API + `clawguandan` CLI，支持建桌、加入、准备、`nextstate` 长轮询与 `seq` 乐观锁。
+<h1 align="center">clawguandan</h1>
 
-## 平台支持
+<p align="center">
+  <strong>AI Native Guandan Card Game</strong>
+</p>
 
-- 官方支持：Linux、macOS、Windows 上的 WSL2（Linux 用户态）。
-- Windows 原生命令行（PowerShell/CMD）不在支持范围内；请在 WSL2 中运行本项目命令。
+<p align="center">
+  A semi-entertainment, semi-research AI Native Guandan card game project, supporting mixed matches between AI agents and human players.
+</p>
 
-## 运行服务端
+<p align="center">
+  <a href="https://github.com/mikewei/clawguandan/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT" /></a>
+  <a href="https://github.com/mikewei/clawguandan/releases"><img src="https://img.shields.io/github/v/release/mikewei/clawguandan" alt="Release" /></a>
+</p>
 
-```bash
-cargo run --bin clawguandan -- server serve
-# 默认 0.0.0.0:22222；可用 `--ip <ip>`、`--port <port>` 或环境变量 `PORT` 覆盖
-```
+<p align="center">
+  <a href="README_zh.md">简体中文</a>
+</p>
 
-## CLI
+## Why ClawGuandan?
 
-```bash
-cargo run --bin clawguandan -- server use 127.0.0.1:22222
-cargo run --bin clawguandan -- server use 127.0.0.1:22222
-cargo run --bin clawguandan -- table create "Friday"
-cargo run --bin clawguandan -- table create "Friday" --rank 8
-cargo run --bin clawguandan -- table join -t <tableId> --name Alice --seat auto
-cargo run --bin clawguandan -- table join -t <tableId> --name Bot-S --type bot --model gpt-4o --seat auto
-# join 会下发 playerKey，CLI 写入 `$TMPDIR/clawguandan/<hostPortKey>/<tableId>/<playerId>/auth.json`
-# 先 `table nextstate` 同步 lastAppliedSeq（写入同目录 `session.json`），再 `play ready`（auto-seq + auto playerKey）
-# 观战无 `-p` 时会话在 `.../<tableId>/observer.<name>/session.json`；`--observer-name` 仅此时可用（与 `-p` 互斥），省略时名为 default
-cargo run --bin clawguandan -- table nextstate -t <tableId> -p <playerId>
-cargo run --bin clawguandan -- play ready -t <tableId> -p <playerId>
-# 如需显式覆盖，也可传 --player-key/-k
-cargo run --bin clawguandan -- play ready -t <tableId> -p <playerId> -k <playerKey>
-```
+`clawguandan` is a semi-entertainment, semi-research AI Native Guandan card game project. It implements Guandan, one of the most popular card game formats in China.
 
-`table create` 不传 `--rank` 时默认从 `2` 开始；可选值为 `2-10/J/Q/K/A`。
-`table join --model` 仅在 `--type bot` 时生效；非 bot（机器人）类型会静默忽略该字段。
+With this project, you can easily run mixed matches between AI players and human players. It can be used both for casual fun and for research: observing and comparing strategy, collaboration, and technical progress across different LLMs in real gameplay environments.
 
-`clawguandan server new` 会后台启动同一个二进制，并运行 `server serve`。（可通过 `CLAW_GUANDAN_SERVER_BIN` 指定路径）
+## Features
 
-## 规则（精简版 Markdown）
+- Full implementation of core Guandan game flow and rule logic
+- HTTP API-based client/server architecture for both local and remote deployment
+- A polished Web UI and CLI, enabling seamless human-AI interaction
+- Support for natural language AI integration via OpenClaw / Hermes Skills
 
-- 正文随二进制嵌入在 [`web/rules/`](web/rules/)（英文 `rules_en.md`、中文 `rules_zh.md`）；完整叙述仍以 [`doc/guandan_rules_en.md`](doc/guandan_rules_en.md) / [`doc/guandan_rules_zh.md`](doc/guandan_rules_zh.md) 为准。
-- **HTTP**：`GET /api/v1/rules`（默认 `lang=en`），或 `GET /api/v1/rules?lang=zh`。响应为 Markdown，`Content-Type: text/markdown; charset=utf-8`。
-- **CLI**（无需已配置 server）：`clawguandan show rules`、`clawguandan show rules --lang zh`、`clawguandan show version`（打印详细版本/构建信息，支持 `--json`；兼容旧别名 `show verion`）。
+## Install
+(To be completed)
 
-## 测试
+## Quick Start
+
+### CLI
+
+1) Start the server:
 
 ```bash
-cargo test
-cargo test --features test-utils   # 含 HTTP 集成测试（如 rules、tables API）
-cargo clippy --all-targets -- -D warnings
+clawguandan server start
 ```
+
+2) Add AI players (example: connecting to a local Hermes agent):
+
+```bash
+clawguandan bot llm-bot --players 3 --default-script hermes
+```
+
+3) Let human players join:
+
+Open `http://127.0.0.1:22222` in your browser to enter the game UI.
+
+### Start with Skills
+(To be completed)
