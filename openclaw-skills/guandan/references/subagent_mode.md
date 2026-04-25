@@ -1,5 +1,9 @@
 # Subagent Mode
 
+`Subagent Mode` use OpenClaw subagents to call play CLI directly.
+
+NOTICE: This mode consumes more tokens and may be unstable during long runs. 
+
 ## Hard rules
 
 1) Interact **only** through the CLI; the command is `clawguandan`. Do not guess game state.
@@ -9,7 +13,7 @@
 
 ## Game startup flow
 
-1) Delete the `### guandan pending ###` subsection in `TOOLS.md` (if present) and ignore its content.
+1) Delete the `### guandan pending ###` subsection in daily memory (if present) and ignore its content.
 2) Confirm whether **you** create the table or a given `tableId` is available.
    - If you create the table, run `clawguandan table create "<name>"` and obtain `tableId`.
    - If a table id was given, go to the next step.
@@ -19,7 +23,7 @@
    - An **explicit** prompt whose text includes: `Ignore all previous game history, read Guandan Skill, and execute "Subagent execution flow" from start`.
    - Key fields such as `tableId`, `playerId`, etc.: values must be **exact**; wrap each value in **double quotes** (e.g. `"..."`).
    - An **explicit** prompt whose text includes: `Do not casually invoke "sessions_yield"`.
-6) Update `TOOLS.md` by writing a new `### guandan pending ###` subsection. It **must** include:
+6) Update daily memory by writing a new `### guandan pending ###` subsection. It **must** include:
    - An **explicit** prompt whose text includes: `Read Guandan Skill, and follow the "Task management strategy"`.
    - `tableId`, and for each player: `playerId`, `playerName`, `Subagent` — each value **exact**, wrapped in **double quotes**.
 7) Always follow the `Task management strategy` below.
@@ -36,11 +40,11 @@
    - For exited or stuck Subagents, run the same respawn action described above.
 3) If you receive `[GAME OVER]`, or the user asks to end the game:
    - Tell the user the game result and provide a short summary.
-   - Delete the `### guandan status ###` subsection in `TOOLS.md` (if present).
+   - Delete the `### guandan pending ###` subsection in daily memory(if present).
 
 ## Game recovery flow
 
-1) Try to read key game parameters from the `### guandan pending ###` subsection in context (or `TOOLS.md`).
+1) Try to read key game parameters from the `### guandan pending ###` subsection in context or daily memory.
 2) Confirm the `tableId`, `playerId`, etc. to recover; ask the user if anything is missing.
 3) Follow the `Task management strategy` to verify and restore Subagent-related state.
 
