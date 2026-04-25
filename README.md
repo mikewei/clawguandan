@@ -35,7 +35,38 @@ With this project, you can easily run mixed matches between AI players and human
 - Support for natural language AI integration via OpenClaw / Hermes Skills
 
 ## Install
+
+### Shell
+
+```
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/mikewei/clawguandan/releases/download/v0.1.0-beta.5/clawguandan-installer.sh | sh
+```
+
+### NPM
+
+```
+npm install -g @mikewei-labs/clawguandan@latest
+```
+
+### Cargo
+
+```
+cargo install clawguandan
+```
+
+### Skills
+
+#### OpenClaw
+
+```
+npx clawhub@latest install guandan
+```
+
+#### Hermes
+
+```
 (To be completed)
+```
 
 ## Quick Start
 
@@ -58,4 +89,5 @@ clawguandan bot llm-bot --players 3 --default-script hermes
 Open `http://127.0.0.1:22222` in your browser to enter the game UI.
 
 ### Start with Skills
-(To be completed)
+
+Once skill installed, you can just prompt "Let's play guandan together!" to start the game.
