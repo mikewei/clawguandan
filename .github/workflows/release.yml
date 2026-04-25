@@ -285,8 +285,16 @@ jobs:
       - name: Publish to NPM
         shell: bash
         run: |
-          # 1. 进入包目录
-          cd target/distrib/clawguandan-npm-package
+          # 1. 自动寻找 npm 包目录 (防止 cargo dist 生成的目录名带版本号导致路径匹配失败)
+          # 通常目录名类似 clawguandan-npm-package
+          NPM_DIR=$(find target/distrib/ -type d -name "*-npm-package" | head -n 1)
+          if [ -z "$NPM_DIR" ]; then
+            echo "Error: Could not find npm package directory in target/distrib/"
+            ls -R target/distrib/
+            exit 1
+          fi
+          echo "Found npm directory: $NPM_DIR"
+          cd "$NPM_DIR
           # 2. 从 package.json 提取版本号
           VERSION=$(node -p "require('./package.json').version")
           echo "Detected version: $VERSION"
