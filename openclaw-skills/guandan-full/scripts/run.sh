@@ -12,7 +12,7 @@ else
   echo "  1) PATH (via command -v clawguandan)" >&2
   echo "  2) ./node_modules/.bin/clawguandan" >&2
   echo "Install with:" >&2
-  echo "  npm install @mikewie-labs/clawguandan@next" >&2
+  echo "  npm install @mikewei-labs/clawguandan@0.1.0-beta.7" >&2
   exit 1
 fi
 
