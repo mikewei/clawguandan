@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [unreleased]
+
+### 🐛 Bug Fixes
+
+- Change default bot script to 'hermes'
+- Hermes skills install path bug
+
 ## [0.1.0] - 2026-04-26
 
 ### 🚀 Features
