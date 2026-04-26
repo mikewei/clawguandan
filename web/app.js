@@ -43,6 +43,26 @@ const CREATE_RANK_OPTIONS = new Set([
   "K",
   "A",
 ]);
+const CHEAT_SHEET_ORDINARY_PATTERNS = [
+  { key: "single", sample: ["♠A"] },
+  { key: "pair", sample: ["♠9", "♥9"] },
+  { key: "triple", sample: ["♠Q", "♥Q", "♣Q"] },
+  { key: "fullHouse", sample: ["♠8", "♥8", "♣8", "♠5", "♥5"] },
+  { key: "straight", sample: ["♣10", "♠J", "♥Q", "♣K", "♦A"] },
+  { key: "tube", sample: ["♠4", "♥4", "♠5", "♥5", "♠6", "♥6"] },
+  { key: "plate", sample: ["♠6", "♥6", "♣6", "♠7", "♥7", "♣7"] },
+];
+const CHEAT_SHEET_BOMBS_ASC = [
+  { key: "bomb4", sample: ["♠9", "♥9", "♦9", "♣9"] },
+  { key: "bomb5", sample: ["♠10", "♥10", "♦10", "♣10", "♠10"] },
+  { key: "straightFlush", sample: ["♣6", "♣7", "♣8", "♣9", "♣10"] },
+  { key: "bomb6", sample: ["♠J", "♥J", "♦J", "♣J", "♠J", "♥J"] },
+  { key: "bomb7", sample: ["♠Q", "♥Q", "♦Q", "♣Q", "♠Q", "♥Q", "♦Q"] },
+  { key: "bomb8", sample: ["♠K", "♥K", "♦K", "♣K", "♠K", "♥K", "♦K", "♣K"] },
+  { key: "bomb9", sample: ["♠A", "♥A", "♦A", "♣A", "♠A", "♥A", "♦A", "♣A", "♥2"] },
+  { key: "bomb10", sample: ["♠K", "♥K", "♦K", "♣K", "♠K", "♥K", "♦K", "♣K", "♥2", "♥2"] },
+  { key: "fourJoker", sample: ["🃏R", "🃏R", "🃏b", "🃏b"] },
+];
 
 const state = {
   session: loadSession(),
@@ -81,6 +101,10 @@ const el = {
   createTableModalRank: document.getElementById("createTableModalRank"),
   createTableCancelBtn: document.getElementById("createTableCancelBtn"),
   createTableConfirmBtn: document.getElementById("createTableConfirmBtn"),
+  cheatSheetBtn: document.getElementById("cheatSheetBtn"),
+  cheatSheetModal: document.getElementById("cheatSheetModal"),
+  cheatSheetCloseBtn: document.getElementById("cheatSheetCloseBtn"),
+  cheatSheetContent: document.getElementById("cheatSheetContent"),
   sessionInfo: document.getElementById("sessionInfo"),
   expectInfo: document.getElementById("expectInfo"),
   promptInfo: document.getElementById("promptInfo"),
@@ -146,6 +170,7 @@ let idHovercardAnchor = null;
 let idHovercardPoint = null;
 let idHovercardPinned = false;
 let idHovercardHideTimer = null;
+let isCheatSheetModalOpen = false;
 /** @type {{ type: 'select'|'deselect', groupKey: string, timerId: ReturnType<typeof setTimeout> } | null} */
 let handGroupChainState = null;
 
@@ -797,6 +822,81 @@ function closeCreateTableModal(result) {
   el.createTableModal.classList.add("hidden");
   el.createTableModal.setAttribute("aria-hidden", "true");
   resolve(result);
+}
+
+function renderCheatSheetCards(cards) {
+  const row = document.createElement("div");
+  row.className = "cheat-sheet-cards";
+  cards.forEach((card) => {
+    row.appendChild(renderCardFace(card, { compact: true }));
+  });
+  return row;
+}
+
+function renderCheatSheetSection(titleKey, rows, keyPrefix) {
+  const section = document.createElement("section");
+  section.className = "cheat-sheet-section";
+
+  const title = document.createElement("h4");
+  title.textContent = t(titleKey);
+  section.appendChild(title);
+
+  rows.forEach((entry, idx) => {
+    const item = document.createElement("div");
+    item.className = "cheat-sheet-item";
+
+    const textWrap = document.createElement("div");
+    textWrap.className = "cheat-sheet-item-text";
+
+    const name = document.createElement("div");
+    name.className = "cheat-sheet-item-name";
+    if (keyPrefix === "bomb") {
+      name.textContent = tf("cheatSheetBombLine", {
+        order: idx + 1,
+        name: t(`cheatSheetBomb.${entry.key}.name`),
+      });
+    } else {
+      name.textContent = t(`cheatSheetPattern.${entry.key}.name`);
+    }
+    textWrap.appendChild(name);
+
+    const desc = document.createElement("div");
+    desc.className = "cheat-sheet-item-desc muted";
+    desc.textContent = t(`cheatSheet${keyPrefix === "bomb" ? "Bomb" : "Pattern"}.${entry.key}.desc`);
+    textWrap.appendChild(desc);
+
+    item.appendChild(textWrap);
+    item.appendChild(renderCheatSheetCards(entry.sample));
+    section.appendChild(item);
+  });
+
+  return section;
+}
+
+function renderCheatSheetContent() {
+  if (!el.cheatSheetContent) return;
+  el.cheatSheetContent.innerHTML = "";
+  el.cheatSheetContent.appendChild(
+    renderCheatSheetSection("cheatSheetPatternsTitle", CHEAT_SHEET_ORDINARY_PATTERNS, "pattern"),
+  );
+  el.cheatSheetContent.appendChild(
+    renderCheatSheetSection("cheatSheetBombsTitle", CHEAT_SHEET_BOMBS_ASC, "bomb"),
+  );
+}
+
+function showCheatSheetModal() {
+  if (!el.cheatSheetModal) return;
+  renderCheatSheetContent();
+  isCheatSheetModalOpen = true;
+  el.cheatSheetModal.classList.remove("hidden");
+  el.cheatSheetModal.setAttribute("aria-hidden", "false");
+}
+
+function closeCheatSheetModal() {
+  if (!el.cheatSheetModal || !isCheatSheetModalOpen) return;
+  isCheatSheetModalOpen = false;
+  el.cheatSheetModal.classList.add("hidden");
+  el.cheatSheetModal.setAttribute("aria-hidden", "true");
 }
 
 async function createTableFromModal() {
@@ -2458,6 +2558,9 @@ async function init() {
       setConnection(t("connIdle"));
     }
     renderFooterMeta();
+    if (isCheatSheetModalOpen) {
+      renderCheatSheetContent();
+    }
   });
 
   el.refreshTablesBtn.addEventListener("click", () => {
@@ -2513,6 +2616,18 @@ async function init() {
     if (ev.key === "Escape") {
       ev.preventDefault();
       closeCreateTableModal(null);
+    }
+  });
+
+  el.cheatSheetBtn?.addEventListener("click", () => {
+    showCheatSheetModal();
+  });
+  el.cheatSheetCloseBtn?.addEventListener("click", () => {
+    closeCheatSheetModal();
+  });
+  el.cheatSheetModal?.addEventListener("click", (ev) => {
+    if (ev.target === el.cheatSheetModal) {
+      closeCheatSheetModal();
     }
   });
 
@@ -2577,6 +2692,10 @@ async function init() {
     }
     if (ev.key === "Escape" && createTableModalResolver) {
       closeCreateTableModal(null);
+      return;
+    }
+    if (ev.key === "Escape" && isCheatSheetModalOpen) {
+      closeCheatSheetModal();
       return;
     }
     if (ev.key !== "Escape") return;

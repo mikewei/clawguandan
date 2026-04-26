@@ -18,6 +18,7 @@
         <span data-i18n="appTitle">Claw Guandan</span>
       </h1>
       <div class="topbar-right">
+        <button id="cheatSheetBtn" type="button" class="cheat-sheet-btn" data-i18n="cheatSheetBtn">Cheat Sheet</button>
         <span class="lang-switch" role="group" aria-label="Language">
           <button type="button" class="lang-btn" data-lang="zh-CN" title="简体中文">中</button>
           <button type="button" class="lang-btn" data-lang="en" title="English">En</button>
@@ -78,6 +79,17 @@
           <button id="createTableCancelBtn" type="button" data-i18n="cancel">Cancel</button>
           <button id="createTableConfirmBtn" type="button" class="accent-btn" data-i18n="confirm">Confirm</button>
         </div>
+      </section>
+    </div>
+
+    <div id="cheatSheetModal" class="modal-backdrop hidden" aria-hidden="true">
+      <section class="modal-card cheat-sheet-modal-card" role="dialog" aria-modal="true" aria-labelledby="cheatSheetModalTitle">
+        <div class="cheat-sheet-modal-head">
+          <h3 id="cheatSheetModalTitle" data-i18n="cheatSheetTitle">Cheat Sheet</h3>
+          <button id="cheatSheetCloseBtn" type="button" class="cheat-sheet-close-btn" aria-label="Close" data-i18n="close">Close</button>
+        </div>
+        <p class="muted cheat-sheet-subtitle" data-i18n="cheatSheetSubtitle">Quick view of patterns and bomb order.</p>
+        <div id="cheatSheetContent" class="cheat-sheet-content"></div>
       </section>
     </div>
 

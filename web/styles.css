@@ -107,6 +107,25 @@ body {
   gap: 8px;
 }
 
+.cheat-sheet-btn {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.14);
+  color: rgba(220, 226, 231, 0.76);
+  height: 24px;
+  padding: 0 10px;
+  margin-right: 10px;
+  line-height: 1;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.cheat-sheet-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: rgba(236, 241, 244, 0.9);
+}
+
 .lang-switch {
   display: inline-flex;
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -624,6 +643,78 @@ button:disabled {
 
 .modal-card h3 {
   margin: 0;
+}
+
+.cheat-sheet-modal-card {
+  width: min(92vw, 720px);
+  gap: 10px;
+}
+
+.cheat-sheet-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cheat-sheet-close-btn {
+  flex-shrink: 0;
+}
+
+.cheat-sheet-subtitle {
+  margin: 0;
+}
+
+.cheat-sheet-content {
+  max-height: min(66vh, 520px);
+  overflow-y: auto;
+  display: grid;
+  gap: 14px;
+  padding-right: 2px;
+}
+
+.cheat-sheet-section {
+  display: grid;
+  gap: 8px;
+}
+
+.cheat-sheet-section h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.cheat-sheet-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.cheat-sheet-item-text {
+  min-width: 0;
+}
+
+.cheat-sheet-item-name {
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.cheat-sheet-item-desc {
+  margin-top: 3px;
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+
+.cheat-sheet-cards {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .modal-form-row {
@@ -1535,6 +1626,30 @@ button:disabled {
 
   .topbar-right {
     margin-left: auto;
+  }
+
+  .cheat-sheet-btn {
+    padding: 0 8px;
+    font-size: 0.7rem;
+    margin-right: 12px;
+  }
+
+  .cheat-sheet-modal-card {
+    width: min(95vw, 620px);
+  }
+
+  .cheat-sheet-content {
+    max-height: 62vh;
+    gap: 10px;
+  }
+
+  .cheat-sheet-item {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .cheat-sheet-cards {
+    justify-content: flex-start;
   }
 
   .table-surface {
