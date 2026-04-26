@@ -4,11 +4,11 @@
 
 NOTICE:
 - This mode consumes more tokens and may be unstable during long runs. 
-- Use the CLI wrapper `./scripts/guandan.sh` to replace `<clawguandan>` in the rest of the doc.
+- Use the CLI wrapper `./scripts/run.sh` to replace `<clawguandan>` in the rest of the doc.
 
 ## Hard rules
 
-1) Interact **only** through the CLI; the command is `./scripts/guandan.sh`. Do not guess game state.
+1) Interact **only** through the CLI; the command is `./scripts/run.sh`. Do not guess game state.
 2) Treat **only** JSON returned by the CLI as the source of truth.
 3) Decide quickly by default; slow down when the user asks for deeper thought.
 4) When mentioning **IDs** (such as `tableId`, `playerId`), copy them **verbatim, character-by-character** from the original text. Do **not** paraphrase or guess ID formats.
