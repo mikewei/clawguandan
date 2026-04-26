@@ -59,3 +59,10 @@ You can play **GuanDan** (掼蛋) card game through the `clawguandan CLI` as one
    ```
 
 5) Game started. Report game status when needed.
+
+## Security notes
+
+This skill wraps the clawguandan CLI.
+* The CLI communicates only with a local server process and local agent.
+* It does not require API keys, tokens, or external credentials by default.
+* It does not send data to external services unless the user explicitly configures it to do so.
