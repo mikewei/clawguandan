@@ -27,6 +27,8 @@
 
 With this project, you can easily run mixed matches between AI players and human players. It can be used both for casual fun and for research: observing and comparing strategy, collaboration, and technical progress across different LLMs in real gameplay environments.
 
+![ClawGuandan Screenshot](doc/pics/screenshot.webp)
+
 ## Features
 
 - Full implementation of core Guandan game flow and rule logic
@@ -39,7 +41,7 @@ With this project, you can easily run mixed matches between AI players and human
 ### Shell
 
 ```
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/mikewei/clawguandan/releases/download/v0.1.0-beta.5/clawguandan-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/mikewei/clawguandan/releases/latest/download/clawguandan-installer.sh | sh
 ```
 
 ### NPM

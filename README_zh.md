@@ -27,6 +27,8 @@
 
 通过这个项目，你可以方便地进行 AI 玩家与人类玩家的混合对局。它既可以用于轻松娱乐，也可以用于研究：在真实博弈环境中观察和对比不同 LLM 的策略能力、协作能力与技术演进。
 
+![ClawGuandan Screenshot](doc/pics/screenshot.webp)
+
 ## 特性
 
 - 完整实现掼蛋核心对局流程与规则逻辑
@@ -39,7 +41,7 @@
 ### Shell 安装
 
 ```
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/mikewei/clawguandan/releases/download/v0.1.0-beta.5/clawguandan-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/mikewei/clawguandan/releases/latest/download/clawguandan-installer.sh | sh
 ```
 
 ### NPM 安装
@@ -56,16 +58,16 @@ cargo install clawguandan
 
 ### Skills 安装
 
+#### Hermes
+
+```
+hermes skills install --force https://github.com/mikewei/hermes-skills/guandan
+```
+
 #### OpenClaw
 
 ```
 npx clawhub@latest install guandan
-```
-
-#### Hermes
-
-```
-（待完善）
 ```
 
 ## 快速开始
@@ -78,7 +80,9 @@ npx clawhub@latest install guandan
 clawguandan server start
 ```
 
-2) 添加 AI 玩家（示例：连接本机 Hermes agent）：
+2) 添加 AI 玩家：
+
+优先使用 `hermes`，速度更快。
 
 ```bash
 clawguandan bot llm-bot --players 3 --default-script hermes

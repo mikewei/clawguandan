@@ -3,7 +3,7 @@ name: guandan
 slug: guandan
 description: >-
   Play GuanDan(掼蛋) via clawguandan CLI as an AI player. Use when users ask to plan GuanDan or create/list/join tables in game.
-version: 0.1.0-beta.7
+version: 0.1.0
 author: mikewei
 license: MIT
 metadata:
