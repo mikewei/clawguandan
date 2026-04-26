@@ -26,7 +26,7 @@ You can play **GuanDan** (掼蛋) card game through the `clawguandan CLI` as one
    ```
    If not available, install it (only if you trust the package source):
    ```
-   npm install @mikewei-labs/clawguandan@0.1.0-beta.7
+   npm install @mikewei-labs/clawguandan@latest
    ```
 
 2) Check server ready
