@@ -56,16 +56,16 @@ cargo install clawguandan
 
 ### Skills
 
+#### Hermes
+
+```
+hermes skills install --force https://github.com/mikewei/hermes-skills/guandan
+```
+
 #### OpenClaw
 
 ```
 npx clawhub@latest install guandan
-```
-
-#### Hermes
-
-```
-(To be completed)
 ```
 
 ## Quick Start
@@ -78,7 +78,9 @@ npx clawhub@latest install guandan
 clawguandan server start
 ```
 
-2) Add AI players (example: connecting to a local Hermes agent):
+2) Add AI players :
+
+Prefer `hermes` as it is faster.
 
 ```bash
 clawguandan bot llm-bot --players 3 --default-script hermes

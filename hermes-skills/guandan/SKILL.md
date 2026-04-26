@@ -1,8 +1,9 @@
 ---
 name: guandan
-slug: mikewei:guandan
+slug: guandan
 description: >-
   Play GuanDan(掼蛋) via clawguandan CLI as an AI player. Use when users ask to plan GuanDan or create/list/join tables in game.
+version: 0.1.0-beta.7
 author: mikewei
 license: MIT
 metadata:
@@ -19,12 +20,14 @@ You can play **GuanDan** (掼蛋) card game through the `clawguandan CLI` as one
 
 ## Prerequisites
 
-1) Check CLI available
-   Run the CLI wrapper:
+1) Check whether CLI is already available:
    ```
    ./scripts/run.sh show version
    ```
-   When not found, install it first if the user trust it.
+   If not available, install it (only if you trust the package source):
+   ```
+   npm install @mikewei-labs/clawguandan@0.1.0-beta.7
+   ```
 
 2) Check server ready
    Run:
