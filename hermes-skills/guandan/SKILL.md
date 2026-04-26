@@ -52,7 +52,7 @@ You can play **GuanDan** (掼蛋) card game through the `clawguandan CLI` as one
 
 3) Confirm with the user how many **Bot players** should join, then run the command in background:
    ```
-   ./scripts/run.sh bot llm-bot --default-script openclaw --players <number_of_bot_players> -t <tableId> -v
+   ./scripts/run.sh bot llm-bot --default-script hermes --players <number_of_bot_players> -t <tableId> -v
    ```
    If some error occurs, try to fix it and retry.
 
