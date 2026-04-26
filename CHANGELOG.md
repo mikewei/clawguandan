@@ -9,6 +9,10 @@ All notable changes to this project will be documented in this file.
 - Change default bot script to 'hermes'
 - Hermes skills install path bug
 
+### 🚀 Features
+
+- Add cheat sheet in Web UI
+
 ## [0.1.0] - 2026-04-26
 
 ### 🚀 Features
