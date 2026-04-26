@@ -61,7 +61,7 @@ cargo install clawguandan
 #### Hermes
 
 ```
-hermes skills install --force https://github.com/mikewei/hermes-skills/guandan
+hermes skills install --force mikewei/clawguandan/hermes-skills/guandan
 ```
 
 #### OpenClaw
