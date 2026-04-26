@@ -2,8 +2,8 @@
 name: guandan
 slug: guandan
 description: >-
-  Play GuanDan(掼蛋) via clawguandan CLI as an AI player. Use when users ask to plan GuanDan or create/list/join tables in game.
-version: 0.1.0
+  Play GuanDan(掼蛋) via clawguandan CLI as AI players. Use when users ask to play GuanDan or create/list/join tables in game.
+version: 0.1.1
 author: mikewei
 license: MIT
 metadata:
@@ -16,27 +16,23 @@ prerequisites:
 
 # Guandan
 
-You can play **GuanDan** (掼蛋) card game through the `clawguandan CLI` as one or more AI players.
+You can play **GuanDan** (掼蛋) card game through the `clawguandan` CLI as one or more AI players.
 
 ## Prerequisites
 
-1) Check whether CLI is already available:
+1) Ensure the `clawguandan` command exists (via `clawguandan -V`).
+   If not found, install it (only if you trust the package source):
    ```
-   ./scripts/run.sh show version
-   ```
-   If not available, install it (only if you trust the package source):
-   ```
-   npm install @mikewei-labs/clawguandan@latest
+   npm install -g @mikewei-labs/clawguandan@latest
    ```
 
-2) Check server ready
-   Run:
+2) Verify server readiness:
    ```
-   ./scripts/run.sh server status
+   clawguandan server status
    ```
    If the `status` is unreachable, you can restart the local server:
    ```
-   ./scripts/run.sh server restart
+   clawguandan server restart
    ```
    You can see the Web UI URLs for human users once everything is ready.
 
@@ -44,23 +40,23 @@ You can play **GuanDan** (掼蛋) card game through the `clawguandan CLI` as one
 
 1) Read the current table list:
    ```
-   ./scripts/run.sh table list
+   clawguandan table list
    ```
 
 2) Confirm whether **you** should create the table or the user already specified a table.
-   - If you create the table, run `./scripts/run.sh table create "<a_cool_table_name>"` and obtain `tableId`.
+   - If you create the table, run `clawguandan table create "<a_cool_table_name>"` and obtain `tableId`.
 
 3) Confirm with the user how many **Bot players** should join, then run the command in background:
    ```
-   ./scripts/run.sh bot llm-bot --default-script hermes --players <number_of_bot_players> -t <tableId> -v
+   clawguandan bot llm-bot --default-script hermes --players <number_of_bot_players> -t <tableId> -v
    ```
    If some error occurs, try to fix it and retry.
 
 4) If it still does not work, confirm with user either degrade to rule-based bot or switch to `Subagent Mode`:
    - degrade to rule-based bot player:
      ```
-     ./scripts/run.sh bot rule-bot --players <number_of_bot_players> -t <tableId> -v
+     clawguandan bot rule-bot --players <number_of_bot_players> -t <tableId> -v
      ```
-   - switch to `Subagent Mode` (see [references/sugagent_mode.md]).
+   - (Only if the user has confirmed) switch to `Subagent Mode` (load `skill_view("guandan", "references/subagent_mode.md")`).
 
 5) Game started. Report game status when needed.

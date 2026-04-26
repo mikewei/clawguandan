@@ -4,11 +4,10 @@
 
 NOTICE:
 - This mode consumes more tokens and may be unstable during long runs. 
-- Use the CLI wrapper `./scripts/run.sh` to replace `<clawguandan>` in the rest of the doc.
 
 ## Hard rules
 
-1) Interact **only** through the CLI; the command is `./scripts/run.sh`. Do not guess game state.
+1) Interact **only** through the CLI; the command is `clawguandan`. Do not guess game state.
 2) Treat **only** JSON returned by the CLI as the source of truth.
 3) Decide quickly by default; slow down when the user asks for deeper thought.
 4) When mentioning **IDs** (such as `tableId`, `playerId`), copy them **verbatim, character-by-character** from the original text. Do **not** paraphrase or guess ID formats.
@@ -16,10 +15,10 @@ NOTICE:
 ## Game startup flow
 
 1) Confirm table existence (either user provided `tableId` or you create one).
-   - If you create the table, run `<clawguandan> table create "<name>"` and obtain `tableId`.
+   - If you create the table, run `clawguandan table create "<name>"` and obtain `tableId`.
 2) Confirm how many **AI players** to be joined (up to 3 allowed in one session due to the hermes subagent limit), for each AI player:
    - pick a short and **cool** **player name**.
-   - run: `<clawguandan> table join -t <tableId> --name "<playerName>" --type bot --model "<llmModelName>"`, and capture the `playerId` in the output carefully.
+   - run: `clawguandan table join -t <tableId> --name "<playerName>" --type bot --model "<llmModelName>"`, and capture the `playerId` in the output carefully.
    - **CRITICAL**: Do NOT spawn any subagents yet. 
    - Keep a list of `[ {playerName: "...", playerId: "..."} ]`.
 3) Once ALL players have been joined and their `playerIds` are recorded, spawn **subagents** in batch mode:
@@ -41,7 +40,7 @@ NOTICE:
 
 1) **MUST Repeat** the following flow until hand game over:
 
-   1. Run `<clawguandan> play wait4myturn -t <tableId> -p <playerId>` in the **foreground** with timeout of 600 secs. It may block for a while, be patient.
+   1. Run `clawguandan play wait4myturn -t <tableId> -p <playerId>` in the **foreground** with timeout of 600 secs. It may block for a while, be patient.
    2. Read the returned JSON; focus on:
       - `status` / `phase`
       - `expect.kind`
@@ -60,12 +59,12 @@ NOTICE:
 
 Decide based on `expect.kind`:
 
-1) **`ready`**: `<clawguandan> play ready -t <tableId> -p <playerId>`
-2) **`tribute`**: `<clawguandan> play tribute -t <tableId> -p <playerId> "<card>"`
+1) **`ready`**: `clawguandan play ready -t <tableId> -p <playerId>`
+2) **`tribute`**: `clawguandan play tribute -t <tableId> -p <playerId> "<card>"`
    - Tribute the **highest-ranked single card** you can, and avoid spending **heart suit level cards** (wild cards) and other **critical wild** material when possible.
-3) **`exchange`** (return after tribute): `<clawguandan> play returncard -t <tableId> -p <playerId> "<card>"`
+3) **`exchange`** (return after tribute): `clawguandan play returncard -t <tableId> -p <playerId> "<card>"`
    - Return the **lowest-value** unwanted single card, **different** from the tribute card you received.
-4) **`play`**: either `<clawguandan> play playcards -t <tableId> -p <playerId> "<c1,c2,...>"` or `<clawguandan> play pass -t <tableId> -p <playerId>`
+4) **`play`**: either `clawguandan play playcards -t <tableId> -p <playerId> "<c1,c2,...>"` or `clawguandan play pass -t <tableId> -p <playerId>`
    - If you are leading a new trick (empty `topPlay`), shed more weak cards to shrink your hand count:
      - prefer the small (see `Beating rules` below) legal non-bomb combinations;
      - among similarly low-strength options, prefer combinations that use more cards
@@ -114,7 +113,7 @@ Decide based on `expect.kind`:
 
 ### Complete rules
 
-Run `<clawguandan> show rules` to see the complete game rules if you really need it.
+Run `clawguandan show rules` to see the complete game rules if you really need it.
 
 ### Error recovery
 
