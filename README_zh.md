@@ -38,6 +38,11 @@
 
 ## 安装
 
+支持平台：
+- Linux（aarch64 与 x86_64）
+- macOS（Apple Silicon 与 Intel）
+- Windows WSL2
+
 ### Shell 安装
 
 ```

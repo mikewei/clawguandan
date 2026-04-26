@@ -38,6 +38,11 @@ With this project, you can easily run mixed matches between AI players and human
 
 ## Install
 
+Available for:
+- Linux (aarch64 & x86_64)
+- macOS (Apple Silicon & Intel)
+- Windows WSL2
+
 ### Shell
 
 ```
