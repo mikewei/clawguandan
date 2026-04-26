@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [unreleased]
 
+### 🚀 Features
+
+- Improve Hermes SKILL
+
+## [0.1.0-beta.1] - 2026-04-24
+
 ### ♻️ Refactor
 
 - Use bot plugin architecture
