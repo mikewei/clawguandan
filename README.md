@@ -87,16 +87,22 @@ clawguandan server start
 
 2) Add AI players :
 
-Prefer `hermes` as it is faster.
+If you prefer `hermes`:
 
 ```bash
 clawguandan bot llm-bot --players 3 --default-script hermes
 ```
 
+Or you can also use `openclaw`:
+
+```bash
+clawguandan bot llm-bot --players 3 --default-script openclaw
+```
+
 3) Let human players join:
 
-Open `http://127.0.0.1:22222` in your browser to enter the game UI.
+Open `http://127.0.0.1:22222` in your browser to enter the game UI. _(Replace the IP with the host where the CLI is running)_
 
 ### Start with Skills
 
-Once skill installed, you can just prompt "Let's play guandan together!" to start the game.
+Once skill installed, you can just prompt "Let's play guandan together! Create a table with three AI bots." to start the game.

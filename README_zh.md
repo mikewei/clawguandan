@@ -87,16 +87,22 @@ clawguandan server start
 
 2) 添加 AI 玩家：
 
-优先使用 `hermes`，速度更快。
+如果你倾向使用 `hermes`：
 
 ```bash
 clawguandan bot llm-bot --players 3 --default-script hermes
 ```
 
+或者你也可以使用 `openclaw`：
+
+```bash
+clawguandan bot llm-bot --players 3 --default-script openclaw
+```
+
 3) 让人类玩家加入：
 
-在浏览器中打开 `http://127.0.0.1:22222`，即可进入游戏界面。
+在浏览器中打开 `http://127.0.0.1:22222`，即可进入游戏界面。_（将该 IP 替换为 CLI 所在主机的地址）_
 
 ### 通过 Skills 启动
 
-完成 Skill 安装后，你只需要输入“Let's play guandan together!”就可以开始游戏。
+完成 Skill 安装后，你只需要输入“我们一起来玩掼蛋吧！创建一个有三个 AI 机器人的牌桌。”就可以开始游戏。
