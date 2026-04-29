@@ -75,22 +75,7 @@ fn suit_weight_desc(suit: Suit) -> u8 {
 }
 
 fn parse_hand_level_api(level: &str) -> HandLevel {
-    match level {
-        "2" => HandLevel::Two,
-        "3" => HandLevel::Three,
-        "4" => HandLevel::Four,
-        "5" => HandLevel::Five,
-        "6" => HandLevel::Six,
-        "7" => HandLevel::Seven,
-        "8" => HandLevel::Eight,
-        "9" => HandLevel::Nine,
-        "10" => HandLevel::Ten,
-        "J" => HandLevel::J,
-        "Q" => HandLevel::Q,
-        "K" => HandLevel::K,
-        "A" => HandLevel::A,
-        _ => panic!("unknown hand level: {level}"),
-    }
+    HandLevel::from_api_str(level).unwrap_or_else(|| panic!("unknown hand level: {level}"))
 }
 
 fn assert_cards_desc(cards: &[Value], hand_level: HandLevel) {
