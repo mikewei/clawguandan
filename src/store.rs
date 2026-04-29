@@ -5,7 +5,6 @@ use crate::domain::{
     TableRuntimeState, TableState, TableStatus, iso_timestamp, snapshot_replace_delta,
 };
 use crate::error::AppError;
-use crate::game::card::HandLevel;
 use crate::game::engine::{GameEngine, PlayerAction};
 use crate::game::rules::narration::{
     format_big_play, format_game_end_by_leave, format_hand_end, format_hand_open,
@@ -270,10 +269,11 @@ impl TableStore {
             inner.state.game_config = GameConfig {
                 rng_seed: TableRuntimeState::hash_table_id_seed(&inner.state.table_id),
             };
-            let first_hand_level = level_to_hand_level(match inner.state.current_declarer {
+            let first_hand_level = match inner.state.current_declarer {
                 TeamId::Ew => inner.state.team_progress_ew.level,
                 TeamId::Sn => inner.state.team_progress_sn.level,
-            });
+            }
+            .to_hand_level();
             let engine = GameEngine::new(inner.state.game_config.clone());
             let mut gs = engine.init_table(inner.state.table_id.clone());
             engine
@@ -287,10 +287,11 @@ impl TableStore {
         } else if will_start_next_hand {
             let seq = inner.state.seq;
             let declarer = inner.state.current_declarer;
-            let next_hand_level = level_to_hand_level(match declarer {
+            let next_hand_level = match declarer {
                 TeamId::Ew => inner.state.team_progress_ew.level,
                 TeamId::Sn => inner.state.team_progress_sn.level,
-            });
+            }
+            .to_hand_level();
             let finishing_order = inner.state.last_finishing_order.clone();
             let engine = GameEngine::new(inner.state.game_config.clone());
             let canceled_opening_lead = {
@@ -524,8 +525,8 @@ impl TableStore {
         inner.state.last_finishing_order = completed_order.clone();
         reset_all_players_ready(&mut inner.state);
 
-        let ew_level = level_to_api(inner.state.team_progress_ew.level);
-        let sn_level = level_to_api(inner.state.team_progress_sn.level);
+        let ew_level = inner.state.team_progress_ew.level.as_api_str();
+        let sn_level = inner.state.team_progress_sn.level.as_api_str();
         let finish_names = completed_order
             .iter()
             .map(|seat| player_name_for_seat(&inner.state, *seat))
@@ -981,42 +982,6 @@ fn infer_win_type(order: &[Seat], winner: TeamId) -> WinType {
         return WinType::OneThree;
     }
     WinType::OneFour
-}
-
-fn level_to_api(level: Level) -> &'static str {
-    match level {
-        Level::Two => "2",
-        Level::Three => "3",
-        Level::Four => "4",
-        Level::Five => "5",
-        Level::Six => "6",
-        Level::Seven => "7",
-        Level::Eight => "8",
-        Level::Nine => "9",
-        Level::Ten => "10",
-        Level::J => "J",
-        Level::Q => "Q",
-        Level::K => "K",
-        Level::A => "A",
-    }
-}
-
-fn level_to_hand_level(level: Level) -> HandLevel {
-    match level {
-        Level::Two => HandLevel::Two,
-        Level::Three => HandLevel::Three,
-        Level::Four => HandLevel::Four,
-        Level::Five => HandLevel::Five,
-        Level::Six => HandLevel::Six,
-        Level::Seven => HandLevel::Seven,
-        Level::Eight => HandLevel::Eight,
-        Level::Nine => HandLevel::Nine,
-        Level::Ten => HandLevel::Ten,
-        Level::J => HandLevel::J,
-        Level::Q => HandLevel::Q,
-        Level::K => HandLevel::K,
-        Level::A => HandLevel::A,
-    }
 }
 
 #[derive(Clone, Copy)]

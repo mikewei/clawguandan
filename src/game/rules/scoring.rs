@@ -1,3 +1,4 @@
+use crate::game::card::HandLevel;
 use crate::game::types::TeamId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -35,6 +36,50 @@ pub enum Level {
 }
 
 impl Level {
+    pub fn from_api_str(value: &str) -> Option<Level> {
+        HandLevel::from_api_str(value).map(Level::from_hand_level)
+    }
+
+    pub fn as_api_str(self) -> &'static str {
+        self.to_hand_level().as_api_str()
+    }
+
+    pub fn to_hand_level(self) -> HandLevel {
+        match self {
+            Level::Two => HandLevel::Two,
+            Level::Three => HandLevel::Three,
+            Level::Four => HandLevel::Four,
+            Level::Five => HandLevel::Five,
+            Level::Six => HandLevel::Six,
+            Level::Seven => HandLevel::Seven,
+            Level::Eight => HandLevel::Eight,
+            Level::Nine => HandLevel::Nine,
+            Level::Ten => HandLevel::Ten,
+            Level::J => HandLevel::J,
+            Level::Q => HandLevel::Q,
+            Level::K => HandLevel::K,
+            Level::A => HandLevel::A,
+        }
+    }
+
+    fn from_hand_level(level: HandLevel) -> Level {
+        match level {
+            HandLevel::Two => Level::Two,
+            HandLevel::Three => Level::Three,
+            HandLevel::Four => Level::Four,
+            HandLevel::Five => Level::Five,
+            HandLevel::Six => Level::Six,
+            HandLevel::Seven => Level::Seven,
+            HandLevel::Eight => Level::Eight,
+            HandLevel::Nine => Level::Nine,
+            HandLevel::Ten => Level::Ten,
+            HandLevel::J => Level::J,
+            HandLevel::Q => Level::Q,
+            HandLevel::K => Level::K,
+            HandLevel::A => Level::A,
+        }
+    }
+
     pub fn promote_by(self, delta: u8) -> Level {
         let idx = self.to_idx();
         let next = idx.saturating_add(delta as u16);

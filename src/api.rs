@@ -127,24 +127,9 @@ fn parse_create_rank(rank: Option<&str>) -> Result<Level, AppError> {
     let Some(rank) = rank else {
         return Ok(Level::Two);
     };
-    match rank.trim().to_ascii_uppercase().as_str() {
-        "2" => Ok(Level::Two),
-        "3" => Ok(Level::Three),
-        "4" => Ok(Level::Four),
-        "5" => Ok(Level::Five),
-        "6" => Ok(Level::Six),
-        "7" => Ok(Level::Seven),
-        "8" => Ok(Level::Eight),
-        "9" => Ok(Level::Nine),
-        "10" => Ok(Level::Ten),
-        "J" => Ok(Level::J),
-        "Q" => Ok(Level::Q),
-        "K" => Ok(Level::K),
-        "A" => Ok(Level::A),
-        _ => Err(AppError::BadRequest(
-            "invalid rank; allowed values: 2-10, J, Q, K, A".into(),
-        )),
-    }
+    Level::from_api_str(rank).ok_or_else(|| {
+        AppError::BadRequest("invalid rank; allowed values: 2-10, J, Q, K, A".into())
+    })
 }
 
 #[derive(Debug, Deserialize)]

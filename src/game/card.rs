@@ -103,6 +103,25 @@ impl HandLevel {
             HandLevel::A => "A",
         }
     }
+
+    pub fn from_api_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_uppercase().as_str() {
+            "2" => Some(HandLevel::Two),
+            "3" => Some(HandLevel::Three),
+            "4" => Some(HandLevel::Four),
+            "5" => Some(HandLevel::Five),
+            "6" => Some(HandLevel::Six),
+            "7" => Some(HandLevel::Seven),
+            "8" => Some(HandLevel::Eight),
+            "9" => Some(HandLevel::Nine),
+            "10" => Some(HandLevel::Ten),
+            "J" => Some(HandLevel::J),
+            "Q" => Some(HandLevel::Q),
+            "K" => Some(HandLevel::K),
+            "A" => Some(HandLevel::A),
+            _ => None,
+        }
+    }
 }
 
 pub fn parse_card_symbol(sym: &str) -> Result<Card, String> {

@@ -420,42 +420,6 @@ impl TableRuntimeState {
         })
     }
 
-    fn hand_level_to_api(hl: HandLevel) -> &'static str {
-        match hl {
-            HandLevel::Two => "2",
-            HandLevel::Three => "3",
-            HandLevel::Four => "4",
-            HandLevel::Five => "5",
-            HandLevel::Six => "6",
-            HandLevel::Seven => "7",
-            HandLevel::Eight => "8",
-            HandLevel::Nine => "9",
-            HandLevel::Ten => "10",
-            HandLevel::J => "J",
-            HandLevel::Q => "Q",
-            HandLevel::K => "K",
-            HandLevel::A => "A",
-        }
-    }
-
-    fn level_to_api(level: Level) -> &'static str {
-        match level {
-            Level::Two => "2",
-            Level::Three => "3",
-            Level::Four => "4",
-            Level::Five => "5",
-            Level::Six => "6",
-            Level::Seven => "7",
-            Level::Eight => "8",
-            Level::Nine => "9",
-            Level::Ten => "10",
-            Level::J => "J",
-            Level::Q => "Q",
-            Level::K => "K",
-            Level::A => "A",
-        }
-    }
-
     fn materialize_hand_json(&self, g: &TableGameState) -> serde_json::Value {
         let Some(hand) = g.hand.as_ref() else {
             return json!(null);
@@ -524,7 +488,7 @@ impl TableRuntimeState {
         json!({
             "handId": format!("h_{}_{}", g.table_id, g.hand_index),
             "handIndex": g.hand_index,
-            "handLevel": Self::hand_level_to_api(hand.hand_level),
+            "handLevel": hand.hand_level.as_api_str(),
             "dealerSeat": g.dealer_seat.as_str(),
             "leaderSeat": g.leader_seat.as_str(),
             "turnSeat": g.turn_seat.as_str(),
@@ -693,7 +657,7 @@ impl TableRuntimeState {
             TeamPublic {
                 team_id: Self::team_ew_id(),
                 seats: vec!["E".into(), "W".into()],
-                level: Self::level_to_api(self.team_progress_ew.level).into(),
+                level: self.team_progress_ew.level.as_api_str().into(),
                 ace_failed_attempts: self.team_progress_ew.ace_failed_attempts,
                 role: if self.current_declarer == TeamId::Ew {
                     "declarer".into()
@@ -704,7 +668,7 @@ impl TableRuntimeState {
             TeamPublic {
                 team_id: Self::team_sn_id(),
                 seats: vec!["S".into(), "N".into()],
-                level: Self::level_to_api(self.team_progress_sn.level).into(),
+                level: self.team_progress_sn.level.as_api_str().into(),
                 ace_failed_attempts: self.team_progress_sn.ace_failed_attempts,
                 role: if self.current_declarer == TeamId::Sn {
                     "declarer".into()
