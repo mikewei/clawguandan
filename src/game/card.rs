@@ -122,6 +122,36 @@ impl HandLevel {
             _ => None,
         }
     }
+
+    pub fn promote_by(self, delta: u8) -> Self {
+        let idx = self.to_idx();
+        let next = idx.saturating_add(delta as u16);
+        Self::from_idx(next)
+    }
+
+    fn to_idx(self) -> u16 {
+        natural_rank_value(self.to_rank())
+            .expect("hand level rank is never a joker")
+            .into()
+    }
+
+    fn from_idx(idx: u16) -> Self {
+        match idx {
+            2 => HandLevel::Two,
+            3 => HandLevel::Three,
+            4 => HandLevel::Four,
+            5 => HandLevel::Five,
+            6 => HandLevel::Six,
+            7 => HandLevel::Seven,
+            8 => HandLevel::Eight,
+            9 => HandLevel::Nine,
+            10 => HandLevel::Ten,
+            11 => HandLevel::J,
+            12 => HandLevel::Q,
+            13 => HandLevel::K,
+            _ => HandLevel::A,
+        }
+    }
 }
 
 pub fn parse_card_symbol(sym: &str) -> Result<Card, String> {

@@ -272,8 +272,7 @@ impl TableStore {
             let first_hand_level = match inner.state.current_declarer {
                 TeamId::Ew => inner.state.team_progress_ew.level,
                 TeamId::Sn => inner.state.team_progress_sn.level,
-            }
-            .to_hand_level();
+            };
             let engine = GameEngine::new(inner.state.game_config.clone());
             let mut gs = engine.init_table(inner.state.table_id.clone());
             engine
@@ -290,8 +289,7 @@ impl TableStore {
             let next_hand_level = match declarer {
                 TeamId::Ew => inner.state.team_progress_ew.level,
                 TeamId::Sn => inner.state.team_progress_sn.level,
-            }
-            .to_hand_level();
+            };
             let finishing_order = inner.state.last_finishing_order.clone();
             let engine = GameEngine::new(inner.state.game_config.clone());
             let canceled_opening_lead = {
