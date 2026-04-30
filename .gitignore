@@ -24,7 +24,6 @@ ehthumbs.db
 # IDE / Editor
 .idea/
 .vscode/
-.cursor/
 *.swp
 *.swo
 *~
@@ -47,3 +46,17 @@ coverage/
 *.dll
 *.so
 *.dylib
+
+# --- AI agents / copilots ---
+.cursor/
+.codex
+.codex/
+.agents/
+.aider*
+.aider/
+.claude/
+.cursor-tutor/
+.continue/
+.avante/
+.gpt-pilot/
+.windsurf/
