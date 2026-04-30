@@ -103,6 +103,55 @@ impl HandLevel {
             HandLevel::A => "A",
         }
     }
+
+    pub fn from_api_str(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_uppercase().as_str() {
+            "2" => Some(HandLevel::Two),
+            "3" => Some(HandLevel::Three),
+            "4" => Some(HandLevel::Four),
+            "5" => Some(HandLevel::Five),
+            "6" => Some(HandLevel::Six),
+            "7" => Some(HandLevel::Seven),
+            "8" => Some(HandLevel::Eight),
+            "9" => Some(HandLevel::Nine),
+            "10" => Some(HandLevel::Ten),
+            "J" => Some(HandLevel::J),
+            "Q" => Some(HandLevel::Q),
+            "K" => Some(HandLevel::K),
+            "A" => Some(HandLevel::A),
+            _ => None,
+        }
+    }
+
+    pub fn promote_by(self, delta: u8) -> Self {
+        let idx = self.to_idx();
+        let next = idx.saturating_add(delta as u16);
+        Self::from_idx(next)
+    }
+
+    fn to_idx(self) -> u16 {
+        natural_rank_value(self.to_rank())
+            .expect("hand level rank is never a joker")
+            .into()
+    }
+
+    fn from_idx(idx: u16) -> Self {
+        match idx {
+            2 => HandLevel::Two,
+            3 => HandLevel::Three,
+            4 => HandLevel::Four,
+            5 => HandLevel::Five,
+            6 => HandLevel::Six,
+            7 => HandLevel::Seven,
+            8 => HandLevel::Eight,
+            9 => HandLevel::Nine,
+            10 => HandLevel::Ten,
+            11 => HandLevel::J,
+            12 => HandLevel::Q,
+            13 => HandLevel::K,
+            _ => HandLevel::A,
+        }
+    }
 }
 
 pub fn parse_card_symbol(sym: &str) -> Result<Card, String> {

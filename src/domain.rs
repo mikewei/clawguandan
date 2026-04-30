@@ -3,8 +3,7 @@
 use crate::game::card::{HandLevel, sort_card_symbols_desc};
 use crate::game::rules::scoring::{Level, TeamProgress};
 use crate::game::types::{GameConfig, GamePhase, HistoryActionKind, TableGameState, TeamId};
-use serde::de::Error as SerdeDeError;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
@@ -44,36 +43,16 @@ impl Seat {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TableStatus {
     Waiting,
     InGame,
     Finished,
 }
 
-impl Serialize for TableStatus {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(match self {
-            TableStatus::Waiting => "waiting",
-            TableStatus::InGame => "in_game",
-            TableStatus::Finished => "finished",
-        })
-    }
-}
-
-impl<'de> Deserialize<'de> for TableStatus {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        match s.as_str() {
-            "waiting" => Ok(TableStatus::Waiting),
-            "in_game" => Ok(TableStatus::InGame),
-            "finished" => Ok(TableStatus::Finished),
-            _ => Err(SerdeDeError::custom("invalid table status")),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum Phase {
     TableSetup,
     Dealing,
@@ -84,64 +63,13 @@ pub enum Phase {
     Completed,
 }
 
-impl Serialize for Phase {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(match self {
-            Phase::TableSetup => "table_setup",
-            Phase::Dealing => "dealing",
-            Phase::Tribute => "tribute",
-            Phase::Exchange => "exchange",
-            Phase::Playing => "playing",
-            Phase::Scoring => "scoring",
-            Phase::Completed => "completed",
-        })
-    }
-}
-
-impl<'de> Deserialize<'de> for Phase {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        match s.as_str() {
-            "table_setup" => Ok(Phase::TableSetup),
-            "dealing" => Ok(Phase::Dealing),
-            "tribute" => Ok(Phase::Tribute),
-            "exchange" => Ok(Phase::Exchange),
-            "playing" => Ok(Phase::Playing),
-            "scoring" => Ok(Phase::Scoring),
-            "completed" => Ok(Phase::Completed),
-            _ => Err(SerdeDeError::custom("invalid phase")),
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PlayerType {
     Human,
     Bot,
     #[default]
     Unknown,
-}
-
-impl Serialize for PlayerType {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(match self {
-            PlayerType::Human => "human",
-            PlayerType::Bot => "bot",
-            PlayerType::Unknown => "unknown",
-        })
-    }
-}
-
-impl<'de> Deserialize<'de> for PlayerType {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        match s.as_str() {
-            "human" => Ok(PlayerType::Human),
-            "bot" => Ok(PlayerType::Bot),
-            "unknown" => Ok(PlayerType::Unknown),
-            _ => Err(SerdeDeError::custom("invalid player type")),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -160,30 +88,11 @@ pub struct SeatPublic {
     pub remaining_count: Option<u32>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PlayerPresence {
     Active,
     Away,
-}
-
-impl Serialize for PlayerPresence {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(match self {
-            PlayerPresence::Active => "active",
-            PlayerPresence::Away => "away",
-        })
-    }
-}
-
-impl<'de> Deserialize<'de> for PlayerPresence {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        match s.as_str() {
-            "active" => Ok(PlayerPresence::Active),
-            "away" => Ok(PlayerPresence::Away),
-            _ => Err(SerdeDeError::custom("invalid player presence")),
-        }
-    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -420,42 +329,6 @@ impl TableRuntimeState {
         })
     }
 
-    fn hand_level_to_api(hl: HandLevel) -> &'static str {
-        match hl {
-            HandLevel::Two => "2",
-            HandLevel::Three => "3",
-            HandLevel::Four => "4",
-            HandLevel::Five => "5",
-            HandLevel::Six => "6",
-            HandLevel::Seven => "7",
-            HandLevel::Eight => "8",
-            HandLevel::Nine => "9",
-            HandLevel::Ten => "10",
-            HandLevel::J => "J",
-            HandLevel::Q => "Q",
-            HandLevel::K => "K",
-            HandLevel::A => "A",
-        }
-    }
-
-    fn level_to_api(level: Level) -> &'static str {
-        match level {
-            Level::Two => "2",
-            Level::Three => "3",
-            Level::Four => "4",
-            Level::Five => "5",
-            Level::Six => "6",
-            Level::Seven => "7",
-            Level::Eight => "8",
-            Level::Nine => "9",
-            Level::Ten => "10",
-            Level::J => "J",
-            Level::Q => "Q",
-            Level::K => "K",
-            Level::A => "A",
-        }
-    }
-
     fn materialize_hand_json(&self, g: &TableGameState) -> serde_json::Value {
         let Some(hand) = g.hand.as_ref() else {
             return json!(null);
@@ -524,7 +397,7 @@ impl TableRuntimeState {
         json!({
             "handId": format!("h_{}_{}", g.table_id, g.hand_index),
             "handIndex": g.hand_index,
-            "handLevel": Self::hand_level_to_api(hand.hand_level),
+            "handLevel": hand.hand_level.as_api_str(),
             "dealerSeat": g.dealer_seat.as_str(),
             "leaderSeat": g.leader_seat.as_str(),
             "turnSeat": g.turn_seat.as_str(),
@@ -616,7 +489,7 @@ impl TableRuntimeState {
             .and_then(|g| g.hand.as_ref())
             .and_then(|h| h.hands.get(&seat).cloned())
             .unwrap_or_default();
-        sort_private_hand_cards_desc(&mut hand_cards, hand_level);
+        sort_card_symbols_desc(&mut hand_cards, hand_level);
         let expect = self.compute_expect();
         let mine = expect.actor_player_ids.iter().any(|pid| pid == player_id);
         let (can_play, can_pass) = if expect.kind == "play" {
@@ -693,7 +566,7 @@ impl TableRuntimeState {
             TeamPublic {
                 team_id: Self::team_ew_id(),
                 seats: vec!["E".into(), "W".into()],
-                level: Self::level_to_api(self.team_progress_ew.level).into(),
+                level: self.team_progress_ew.level.as_api_str().into(),
                 ace_failed_attempts: self.team_progress_ew.ace_failed_attempts,
                 role: if self.current_declarer == TeamId::Ew {
                     "declarer".into()
@@ -704,7 +577,7 @@ impl TableRuntimeState {
             TeamPublic {
                 team_id: Self::team_sn_id(),
                 seats: vec!["S".into(), "N".into()],
-                level: Self::level_to_api(self.team_progress_sn.level).into(),
+                level: self.team_progress_sn.level.as_api_str().into(),
                 ace_failed_attempts: self.team_progress_sn.ace_failed_attempts,
                 role: if self.current_declarer == TeamId::Sn {
                     "declarer".into()
@@ -790,10 +663,6 @@ impl TableRuntimeState {
             deadline_at: None,
         }
     }
-}
-
-fn sort_private_hand_cards_desc(hand_cards: &mut [String], hand_level: HandLevel) {
-    sort_card_symbols_desc(hand_cards, hand_level);
 }
 
 /// Encode one JSON Pointer path segment (RFC 6901).
@@ -1103,8 +972,26 @@ mod apply_delta_tests {
             "♥5".to_string(),
             "🃏b".to_string(),
         ];
-        sort_private_hand_cards_desc(&mut cards, HandLevel::Five);
+        sort_card_symbols_desc(&mut cards, HandLevel::Five);
         assert_eq!(cards, vec!["🃏b", "♥5", "♠5", "♠A"]);
+    }
+
+    #[test]
+    fn domain_enums_keep_api_wire_names() {
+        assert_eq!(
+            serde_json::to_value(TableStatus::InGame).unwrap(),
+            "in_game"
+        );
+        assert_eq!(
+            serde_json::to_value(Phase::TableSetup).unwrap(),
+            "table_setup"
+        );
+        assert_eq!(serde_json::to_value(PlayerType::Human).unwrap(), "human");
+        assert_eq!(serde_json::to_value(PlayerPresence::Away).unwrap(), "away");
+        assert_eq!(
+            serde_json::from_value::<TableStatus>(json!("in_game")).unwrap(),
+            TableStatus::InGame
+        );
     }
 
     #[test]

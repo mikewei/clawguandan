@@ -1,5 +1,5 @@
 use crate::game::types::TeamId;
-use serde_json::json;
+use serde_json::{Value, json};
 
 pub fn is_big_play_combination(combination_type: &str) -> bool {
     let ct = combination_type.trim();
@@ -194,6 +194,36 @@ pub fn format_game_end_by_leave(leaving_names: &[String]) -> String {
     )
 }
 
+pub fn last_narration_from_nextstate_json(v: &Value) -> Option<String> {
+    let ops = v.get("delta")?.get("ops")?.as_array()?;
+    let mut out: Option<String> = None;
+    for op in ops {
+        if op.get("op").and_then(|x| x.as_str()) == Some("replace")
+            && op.get("path").and_then(|x| x.as_str()) == Some("/narration")
+            && let Some(val) = op.get("value")
+        {
+            out = Some(match val {
+                Value::String(s) => s.clone(),
+                _ => val.to_string(),
+            });
+        }
+    }
+    out
+}
+
+pub fn narration_display_en(raw: &str) -> String {
+    let t = raw.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    if let Ok(v) = serde_json::from_str::<Value>(t)
+        && let Some(en) = v.get("en").and_then(|x| x.as_str())
+    {
+        return en.trim().to_string();
+    }
+    t.to_string()
+}
+
 fn bilingual(zh: String, en: String) -> String {
     json!({ "zh": zh, "en": en }).to_string()
 }
@@ -235,5 +265,29 @@ mod tests {
         assert!(msg.contains("抗贡"));
         assert!(msg.contains("Bob"));
         assert!(msg.contains("Tribute canceled"));
+    }
+
+    #[test]
+    fn narration_display_en_prefers_en_field() {
+        let raw = r#"{"zh":"中文","en":"Hello"}"#;
+        assert_eq!(narration_display_en(raw), "Hello");
+        assert_eq!(narration_display_en("plain"), "plain");
+    }
+
+    #[test]
+    fn last_narration_from_nextstate_json_reads_replace_ops() {
+        let v = json!({
+            "seq": 3u64,
+            "delta": {
+                "ops": [
+                    { "op": "replace", "path": "/phase", "value": "playing" },
+                    { "op": "replace", "path": "/narration", "value": "{\"zh\":\"z\",\"en\":\"e\"}" }
+                ]
+            }
+        });
+        assert_eq!(
+            last_narration_from_nextstate_json(&v).as_deref(),
+            Some("{\"zh\":\"z\",\"en\":\"e\"}")
+        );
     }
 }

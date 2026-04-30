@@ -2,6 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use serde_json::Value;
 
+use crate::game::rules::narration::{last_narration_from_nextstate_json, narration_display_en};
+
 use super::traits::{
     ObserverGameOverContext, ObserverGameStartContext, ObserverHandOverContext,
     ObserverHandStartContext, ObserverPolicy,
@@ -97,34 +99,4 @@ pub fn default_observer() -> Arc<dyn ObserverPolicy> {
 fn current_plugin_tag(cell: &Mutex<Option<String>>) -> Result<String, String> {
     let g = cell.lock().map_err(|e| e.to_string())?;
     Ok(g.clone().unwrap_or_else(|| "observer".to_string()))
-}
-
-fn last_narration_from_nextstate_json(v: &Value) -> Option<String> {
-    let ops = v.get("delta")?.get("ops")?.as_array()?;
-    let mut out: Option<String> = None;
-    for op in ops {
-        if op.get("op").and_then(|x| x.as_str()) == Some("replace")
-            && op.get("path").and_then(|x| x.as_str()) == Some("/narration")
-            && let Some(val) = op.get("value")
-        {
-            out = Some(match val {
-                Value::String(s) => s.clone(),
-                _ => val.to_string(),
-            });
-        }
-    }
-    out
-}
-
-fn narration_display_en(raw: &str) -> String {
-    let t = raw.trim();
-    if t.is_empty() {
-        return String::new();
-    }
-    if let Ok(v) = serde_json::from_str::<Value>(t)
-        && let Some(en) = v.get("en").and_then(|x| x.as_str())
-    {
-        return en.trim().to_string();
-    }
-    t.to_string()
 }

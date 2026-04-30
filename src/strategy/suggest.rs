@@ -33,39 +33,50 @@ pub fn suggest_next_action(state: &TableGameState, actor: Seat) -> Result<Player
 }
 
 fn pick_tribute(legal: &[PlayerAction], ctx: RuleContext) -> Result<PlayerAction, String> {
-    let mut items: Vec<(u8, String, PlayerAction)> = Vec::new();
-    for a in legal {
-        let PlayerAction::Tribute { card } = a else {
-            continue;
-        };
-        let c = parse_card_symbol(card)?;
-        let v = level_order_value(c, ctx);
-        items.push((v, card.clone(), a.clone()));
-    }
-    items.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-    items
-        .into_iter()
-        .next()
-        .map(|(_, _, act)| act)
-        .ok_or_else(|| "suggest: no tribute action".into())
+    pick_lowest_card_action(
+        legal,
+        ctx,
+        |a| match a {
+            PlayerAction::Tribute { card } => Some(card.as_str()),
+            _ => None,
+        },
+        "suggest: no tribute action",
+    )
 }
 
 fn pick_return(legal: &[PlayerAction], ctx: RuleContext) -> Result<PlayerAction, String> {
+    pick_lowest_card_action(
+        legal,
+        ctx,
+        |a| match a {
+            PlayerAction::ReturnCard { card } => Some(card.as_str()),
+            _ => None,
+        },
+        "suggest: no return_card action",
+    )
+}
+
+fn pick_lowest_card_action<'a>(
+    legal: &'a [PlayerAction],
+    ctx: RuleContext,
+    card_for_action: impl Fn(&'a PlayerAction) -> Option<&'a str>,
+    no_action_error: &'static str,
+) -> Result<PlayerAction, String> {
     let mut items: Vec<(u8, String, PlayerAction)> = Vec::new();
     for a in legal {
-        let PlayerAction::ReturnCard { card } = a else {
+        let Some(card) = card_for_action(a) else {
             continue;
         };
         let c = parse_card_symbol(card)?;
         let v = level_order_value(c, ctx);
-        items.push((v, card.clone(), a.clone()));
+        items.push((v, card.to_string(), a.clone()));
     }
     items.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
     items
         .into_iter()
         .next()
         .map(|(_, _, act)| act)
-        .ok_or_else(|| "suggest: no return_card action".into())
+        .ok_or_else(|| no_action_error.into())
 }
 
 fn pick_playing(legal: &[PlayerAction], ctx: RuleContext) -> Result<PlayerAction, String> {

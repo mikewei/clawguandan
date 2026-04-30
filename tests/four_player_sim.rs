@@ -117,7 +117,10 @@ fn cli_show_version_json_outputs_structured_payload() {
     let out = run_cli_command(bin, &["show", "version", "--json"]).expect("show version --json");
     let got = String::from_utf8_lossy(&out.stdout);
     let v: serde_json::Value = serde_json::from_str(&got).expect("valid json");
-    assert_eq!(v.get("name").and_then(|x| x.as_str()), Some(env!("CARGO_PKG_NAME")));
+    assert_eq!(
+        v.get("name").and_then(|x| x.as_str()),
+        Some(env!("CARGO_PKG_NAME"))
+    );
     assert_eq!(
         v.get("version").and_then(|x| x.as_str()),
         Some(env!("CARGO_PKG_VERSION"))

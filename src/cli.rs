@@ -1274,8 +1274,9 @@ fn ping_pid_blocking(base: &str) -> Result<u32, String> {
 /// Success means `kill(pid, 0)` returns `ESRCH`.
 pub fn server_stop() -> Result<(), String> {
     let base = normalize_base(LOCAL_SERVER_PROBE_ADDR);
-    let pid = ping_pid_blocking(&base)
-        .map_err(|e| format!("cannot stop: no clawguandan server on {LOCAL_SERVER_PROBE_ADDR} ({e})"))?;
+    let pid = ping_pid_blocking(&base).map_err(|e| {
+        format!("cannot stop: no clawguandan server on {LOCAL_SERVER_PROBE_ADDR} ({e})")
+    })?;
 
     platform_process::signal_terminate(pid).map_err(|e| format!("terminate: {e}"))?;
 
@@ -2631,41 +2632,6 @@ impl CliplayShared {
     }
 }
 
-/// Last `/narration` replace in a `nextstate` JSON body (flattened transition).
-#[cfg(test)]
-fn beat_it_last_narration_from_nextstate_json(v: &Value) -> Option<String> {
-    let ops = v.get("delta")?.get("ops")?.as_array()?;
-    let mut out: Option<String> = None;
-    for op in ops {
-        if op.get("op").and_then(|x| x.as_str()) == Some("replace")
-            && op.get("path").and_then(|x| x.as_str()) == Some("/narration")
-        {
-            if let Some(val) = op.get("value") {
-                out = Some(match val {
-                    Value::String(s) => s.clone(),
-                    _ => val.to_string(),
-                });
-            }
-        }
-    }
-    out
-}
-
-/// Narration is often bilingual JSON `{"zh":...,"en":...}` as a string; prefer `en` for CLI.
-#[cfg(test)]
-fn beat_it_narration_display_en(raw: &str) -> String {
-    let t = raw.trim();
-    if t.is_empty() {
-        return String::new();
-    }
-    if let Ok(v) = serde_json::from_str::<Value>(t) {
-        if let Some(en) = v.get("en").and_then(|x| x.as_str()) {
-            return en.trim().to_string();
-        }
-    }
-    t.to_string()
-}
-
 fn simulate_cliplay_subprocess(
     table: Option<String>,
     rank: Option<String>,
@@ -2898,32 +2864,6 @@ fn session_dirs_use_host_table_leaf_layout() {
         Some("t_abc")
     );
     assert!(od.starts_with(session_state_root()));
-}
-
-#[cfg(test)]
-#[test]
-fn beat_it_narration_display_en_prefers_en_field() {
-    let raw = r#"{"zh":"中文","en":"Hello"}"#;
-    assert_eq!(beat_it_narration_display_en(raw), "Hello");
-    assert_eq!(beat_it_narration_display_en("plain"), "plain");
-}
-
-#[cfg(test)]
-#[test]
-fn beat_it_last_narration_from_nextstate_json_reads_replace_ops() {
-    let v = json!({
-        "seq": 3u64,
-        "delta": {
-            "ops": [
-                { "op": "replace", "path": "/phase", "value": "playing" },
-                { "op": "replace", "path": "/narration", "value": "{\"zh\":\"z\",\"en\":\"e\"}" }
-            ]
-        }
-    });
-    assert_eq!(
-        beat_it_last_narration_from_nextstate_json(&v).as_deref(),
-        Some("{\"zh\":\"z\",\"en\":\"e\"}")
-    );
 }
 
 #[cfg(test)]

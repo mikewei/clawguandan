@@ -5,7 +5,6 @@ use crate::domain::{
     TableRuntimeState, TableState, TableStatus, iso_timestamp, snapshot_replace_delta,
 };
 use crate::error::AppError;
-use crate::game::card::HandLevel;
 use crate::game::engine::{GameEngine, PlayerAction};
 use crate::game::rules::narration::{
     format_big_play, format_game_end_by_leave, format_hand_end, format_hand_open,
@@ -61,6 +60,13 @@ impl TableStore {
             tables: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+
+    async fn table_mutex(&self, table_id: &str) -> Result<Arc<TableMutex>, AppError> {
+        let g = self.tables.lock().await;
+        g.get(table_id)
+            .cloned()
+            .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))
+    }
 }
 
 impl Default for TableStore {
@@ -89,10 +95,7 @@ impl TableStore {
     }
 
     pub async fn get_snapshot(&self, table_id: &str) -> Result<TableRuntimeState, AppError> {
-        let g = self.tables.lock().await;
-        let t = g
-            .get(table_id)
-            .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))?;
+        let t = self.table_mutex(table_id).await?;
         let mut inner = t.lock().await;
         Self::expire_inactive_players_locked(&mut inner)?;
         Ok(inner.state.clone())
@@ -145,13 +148,7 @@ impl TableStore {
         player_model: Option<String>,
         seat: SeatOrAuto,
     ) -> Result<(String, String, Seat, PlayerType, Option<String>), AppError> {
-        let arc = {
-            let g = self.tables.lock().await;
-            g.get(table_id)
-                .cloned()
-                .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))?
-        };
-
+        let arc = self.table_mutex(table_id).await?;
         let mut inner = arc.lock().await;
         if !matches!(inner.state.status, TableStatus::Waiting) {
             return Err(AppError::Conflict {
@@ -215,13 +212,7 @@ impl TableStore {
         player_key: &str,
         ready: bool,
     ) -> Result<u64, AppError> {
-        let arc = {
-            let g = self.tables.lock().await;
-            g.get(table_id)
-                .cloned()
-                .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))?
-        };
-
+        let arc = self.table_mutex(table_id).await?;
         let mut inner = arc.lock().await;
         Self::verify_player_identity_locked(&inner, player_id, player_key)?;
         Self::touch_player_activity_locked(&mut inner, player_id);
@@ -270,10 +261,10 @@ impl TableStore {
             inner.state.game_config = GameConfig {
                 rng_seed: TableRuntimeState::hash_table_id_seed(&inner.state.table_id),
             };
-            let first_hand_level = level_to_hand_level(match inner.state.current_declarer {
+            let first_hand_level = match inner.state.current_declarer {
                 TeamId::Ew => inner.state.team_progress_ew.level,
                 TeamId::Sn => inner.state.team_progress_sn.level,
-            });
+            };
             let engine = GameEngine::new(inner.state.game_config.clone());
             let mut gs = engine.init_table(inner.state.table_id.clone());
             engine
@@ -287,10 +278,10 @@ impl TableStore {
         } else if will_start_next_hand {
             let seq = inner.state.seq;
             let declarer = inner.state.current_declarer;
-            let next_hand_level = level_to_hand_level(match declarer {
+            let next_hand_level = match declarer {
                 TeamId::Ew => inner.state.team_progress_ew.level,
                 TeamId::Sn => inner.state.team_progress_sn.level,
-            });
+            };
             let finishing_order = inner.state.last_finishing_order.clone();
             let engine = GameEngine::new(inner.state.game_config.clone());
             let canceled_opening_lead = {
@@ -524,8 +515,8 @@ impl TableStore {
         inner.state.last_finishing_order = completed_order.clone();
         reset_all_players_ready(&mut inner.state);
 
-        let ew_level = level_to_api(inner.state.team_progress_ew.level);
-        let sn_level = level_to_api(inner.state.team_progress_sn.level);
+        let ew_level = inner.state.team_progress_ew.level.as_api_str();
+        let sn_level = inner.state.team_progress_sn.level.as_api_str();
         let finish_names = completed_order
             .iter()
             .map(|seat| player_name_for_seat(&inner.state, *seat))
@@ -590,12 +581,7 @@ impl TableStore {
         action_type: &'static str,
         event_payload: serde_json::Value,
     ) -> Result<u64, AppError> {
-        let arc = {
-            let g = self.tables.lock().await;
-            g.get(table_id)
-                .cloned()
-                .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))?
-        };
+        let arc = self.table_mutex(table_id).await?;
         let mut inner = arc.lock().await;
         Self::apply_action_locked(
             &mut inner,
@@ -614,13 +600,7 @@ impl TableStore {
         since_seq: u64,
         timeout: Option<Duration>,
     ) -> Result<Option<NextStateBody>, AppError> {
-        let arc = {
-            let g = self.tables.lock().await;
-            g.get(table_id)
-                .cloned()
-                .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))?
-        };
-
+        let arc = self.table_mutex(table_id).await?;
         let timeout = timeout.unwrap_or(Duration::from_secs(60));
 
         loop {
@@ -718,12 +698,7 @@ impl TableStore {
         table_id: &str,
         player_id: &str,
     ) -> Result<(), AppError> {
-        let arc = {
-            let g = self.tables.lock().await;
-            g.get(table_id)
-                .cloned()
-                .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))?
-        };
+        let arc = self.table_mutex(table_id).await?;
         let mut inner = arc.lock().await;
         Self::touch_player_activity_locked(&mut inner, player_id);
         Self::expire_inactive_players_locked(&mut inner)?;
@@ -736,12 +711,7 @@ impl TableStore {
         player_id: &str,
         player_key: &str,
     ) -> Result<(), AppError> {
-        let arc = {
-            let g = self.tables.lock().await;
-            g.get(table_id)
-                .cloned()
-                .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))?
-        };
+        let arc = self.table_mutex(table_id).await?;
         let mut inner = arc.lock().await;
         Self::expire_inactive_players_locked(&mut inner)?;
         Self::verify_player_identity_locked(&inner, player_id, player_key)
@@ -983,42 +953,6 @@ fn infer_win_type(order: &[Seat], winner: TeamId) -> WinType {
     WinType::OneFour
 }
 
-fn level_to_api(level: Level) -> &'static str {
-    match level {
-        Level::Two => "2",
-        Level::Three => "3",
-        Level::Four => "4",
-        Level::Five => "5",
-        Level::Six => "6",
-        Level::Seven => "7",
-        Level::Eight => "8",
-        Level::Nine => "9",
-        Level::Ten => "10",
-        Level::J => "J",
-        Level::Q => "Q",
-        Level::K => "K",
-        Level::A => "A",
-    }
-}
-
-fn level_to_hand_level(level: Level) -> HandLevel {
-    match level {
-        Level::Two => HandLevel::Two,
-        Level::Three => HandLevel::Three,
-        Level::Four => HandLevel::Four,
-        Level::Five => HandLevel::Five,
-        Level::Six => HandLevel::Six,
-        Level::Seven => HandLevel::Seven,
-        Level::Eight => HandLevel::Eight,
-        Level::Nine => HandLevel::Nine,
-        Level::Ten => HandLevel::Ten,
-        Level::J => HandLevel::J,
-        Level::Q => HandLevel::Q,
-        Level::K => HandLevel::K,
-        Level::A => HandLevel::A,
-    }
-}
-
 #[derive(Clone, Copy)]
 pub enum SeatOrAuto {
     Auto,
@@ -1174,12 +1108,7 @@ impl TableStore {
         game: crate::game::types::TableGameState,
         game_config: GameConfig,
     ) -> Result<(), AppError> {
-        let arc = {
-            let g = self.tables.lock().await;
-            g.get(table_id)
-                .cloned()
-                .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))?
-        };
+        let arc = self.table_mutex(table_id).await?;
         let mut inner = arc.lock().await;
         inner.state.game_config = game_config;
         inner.state.game = Some(game);
@@ -1198,12 +1127,7 @@ impl TableStore {
         player_id: &str,
         ago: Duration,
     ) -> Result<(), AppError> {
-        let arc = {
-            let g = self.tables.lock().await;
-            g.get(table_id)
-                .cloned()
-                .ok_or_else(|| AppError::NotFound(format!("unknown table_id {}", table_id)))?
-        };
+        let arc = self.table_mutex(table_id).await?;
         let mut inner = arc.lock().await;
         let when = std::time::Instant::now() - ago;
         for slot in inner.state.seats.values_mut() {
